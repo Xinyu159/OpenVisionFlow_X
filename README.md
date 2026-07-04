@@ -227,9 +227,8 @@ Apache 2.0 License - 允许免费商用、二次修改、闭源分发
 
 ## 联系方式
 
-- GitHub: https://github.com/openvisionflow/OpenVisionFlow
-- Issues: https://github.com/openvisionflow/OpenVisionFlow/issues
-- Email: openvisionflow@example.com
+- GitCode仓库: https://gitcode.com/hunyuan2026/OpenVisionFlow
+- Issues反馈: https://gitcode.com/hunyuan2026/OpenVisionFlow/issues
 
 ---
 
