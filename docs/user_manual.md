@@ -69,9 +69,9 @@ OpenVisionFlow 支持以下操作系统和硬件环境：
 
 **步骤1：获取安装包**
 
-从GitHub下载最新版本：
+从GitCode下载最新版本：
 ```bash
-git clone https://github.com/openvisionflow/OpenVisionFlow.git
+git clone https://gitcode.com/hunyuan2026/OpenVisionFlow.git
 cd OpenVisionFlow
 ```
 
@@ -118,7 +118,7 @@ sudo apt-get update
 sudo apt-get install -y cmake build-essential git
 
 # 克隆项目
-git clone https://github.com/openvisionflow/OpenVisionFlow.git
+git clone https://gitcode.com/hunyuan2026/OpenVisionFlow.git
 cd OpenVisionFlow
 
 # 编译

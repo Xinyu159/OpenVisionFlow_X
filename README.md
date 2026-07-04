@@ -105,7 +105,7 @@ OpenVisionFlow/
 
 ```bash
 # 克隆项目
-git clone https://github.com/openvisionflow/OpenVisionFlow.git
+git clone https://gitcode.com/hunyuan2026/OpenVisionFlow.git
 cd OpenVisionFlow
 
 # 配置（启用测试）
