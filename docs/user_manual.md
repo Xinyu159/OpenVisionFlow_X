@@ -1094,6 +1094,5 @@ Python SDK错误码定义：
 **文档结束**
 
 如需更多帮助，请访问：
-- GitHub: https://github.com/openvisionflow/OpenVisionFlow
-- Issues: https://github.com/openvisionflow/OpenVisionFlow/issues
-- 项目Wiki: https://github.com/openvisionflow/OpenVisionFlow/wiki
+- GitCode仓库: https://gitcode.com/hunyuan2026/OpenVisionFlow
+- Issues反馈: https://gitcode.com/hunyuan2026/OpenVisionFlow/issues
