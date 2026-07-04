@@ -1,0 +1,75 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Compiled files
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.pyd
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.slnx
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# IDE/Editor files
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Test reports in root directory
+test_*_report.json
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/

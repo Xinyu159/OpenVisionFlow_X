@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenVisionFlow Editor Pro</title>
+    <!-- Font Awesome 图标库 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+    <!-- Chart.js 图表库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- 自定义样式 -->
+    <link rel="stylesheet" href="style_pro.css">
+</head>
+<body>
+    <div class="app-container" id="appContainer">
+        <!-- ==================== 顶部工具栏 ==================== -->
+        <div class="toolbar">
+            <!-- 品牌标识 -->
+            <div class="toolbar-brand">
+                <i class="fa fa-cube brand-icon"></i>
+                <span>OVF Pro</span>
+            </div>
+
+            <!-- 文件操作 -->
+            <div class="toolbar-group">
+                <button class="toolbar-btn" onclick="cmd('newFlow')" title="新建流程">
+                    <i class="fa fa-file-o btn-icon"></i>
+                    <span class="tooltip">新建流程 (Ctrl+N)</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('openFlow')" title="打开流程">
+                    <i class="fa fa-folder-open-o btn-icon"></i>
+                    <span class="tooltip">打开流程 (Ctrl+O)</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('saveFlow')" title="保存流程">
+                    <i class="fa fa-floppy-o btn-icon"></i>
+                    <span class="tooltip">保存流程 (Ctrl+S)</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('exportFlow')" title="导出">
+                    <i class="fa fa-download btn-icon"></i>
+                    <span class="tooltip">导出 JSON</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('importFlow')" title="导入">
+                    <i class="fa fa-upload btn-icon"></i>
+                    <span class="tooltip">导入 JSON</span>
+                </button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <!-- 编辑操作 -->
+            <div class="toolbar-group">
+                <button class="toolbar-btn" onclick="cmd('undo')" title="撤销">
+                    <i class="fa fa-undo btn-icon"></i>
+                    <span class="tooltip">撤销 (Ctrl+Z)</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('redo')" title="重做">
+                    <i class="fa fa-repeat btn-icon"></i>
+                    <span class="tooltip">重做 (Ctrl+Y)</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('copyNodes')" title="复制">
+                    <i class="fa fa-copy btn-icon"></i>
+                    <span class="tooltip">复制 (Ctrl+C)</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('pasteNodes')" title="粘贴">
+                    <i class="fa fa-paste btn-icon"></i>
+                    <span class="tooltip">粘贴 (Ctrl+V)</span>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('cutNodes')" title="剪切">
+                    <i class="fa fa-scissors btn-icon"></i>
+                    <span class="tooltip">剪切 (Ctrl+X)</span>
+                </button>
+                <button class="toolbar-btn danger" onclick="cmd('deleteSelected')" title="删除">
+                    <i class="fa fa-trash-o btn-icon"></i>
+                    <span class="tooltip">删除 (Delete)</span>
+                </button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <!-- 对齐工具 -->
+            <div class="toolbar-group">
+                <button class="toolbar-btn" onclick="cmd('alignLeft')" title="左对齐">
+                    <i class="fa fa-align-left btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('alignCenter')" title="水平居中">
+                    <i class="fa fa-align-center btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('alignRight')" title="右对齐">
+                    <i class="fa fa-align-right btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('alignTop')" title="顶对齐">
+                    <i class="fa fa-arrow-up btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('alignMiddle')" title="垂直居中">
+                    <i class="fa fa-arrows-v btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('alignBottom')" title="底对齐">
+                    <i class="fa fa-arrow-down btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('distributeH')" title="水平等距">
+                    <i class="fa fa-arrows-h btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('distributeV')" title="垂直等距">
+                    <i class="fa fa-ellipsis-v btn-icon"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <!-- 视图操作 -->
+            <div class="toolbar-group">
+                <button class="toolbar-btn" onclick="cmd('zoomIn')" title="放大">
+                    <i class="fa fa-search-plus btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('zoomOut')" title="缩小">
+                    <i class="fa fa-search-minus btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('fitToScreen')" title="适应屏幕">
+                    <i class="fa fa-expand btn-icon"></i>
+                </button>
+                <button class="toolbar-btn active" onclick="cmd('toggleGrid')" title="网格">
+                    <i class="fa fa-th btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('toggleSnap')" title="吸附">
+                    <i class="fa fa-magnet btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('toggleMinimap')" title="小地图">
+                    <i class="fa fa-map-o btn-icon"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <!-- 运行控制 -->
+            <div class="toolbar-group">
+                <button class="toolbar-btn run" onclick="cmd('runFlow')" title="运行">
+                    <i class="fa fa-play btn-icon"></i>
+                    <span>运行</span>
+                </button>
+                <button class="toolbar-btn stop" onclick="cmd('stopFlow')" title="停止">
+                    <i class="fa fa-stop btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('stepFlow')" title="单步">
+                    <i class="fa fa-step-forward btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('toggleDebug')" title="调试">
+                    <i class="fa fa-bug btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('batchRun')" title="批处理">
+                    <i class="fa fa-files-o btn-icon"></i>
+                </button>
+            </div>
+
+            <div class="toolbar-spacer"></div>
+
+            <!-- 工具区 -->
+            <div class="toolbar-group">
+                <input type="text" class="toolbar-search" id="globalSearch" placeholder="搜索节点..." autocomplete="off">
+                <button class="toolbar-btn" onclick="cmd('compareFlows')" title="流程比较">
+                    <i class="fa fa-columns btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('showShortcuts')" title="快捷键">
+                    <i class="fa fa-keyboard-o btn-icon"></i>
+                </button>
+                <button class="toolbar-btn" onclick="cmd('toggleTheme')" title="主题切换">
+                    <i class="fa fa-moon-o btn-icon" id="themeIcon"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- ==================== 左侧面板 ==================== -->
+        <div class="left-panel">
+            <!-- 搜索 -->
+            <div class="search-container">
+                <i class="fa fa-search search-icon"></i>
+                <input type="text" class="search-input" id="nodeSearch" placeholder="搜索节点（支持模糊匹配）..." autocomplete="off">
+            </div>
+
+            <!-- 节点分类树 -->
+            <div class="panel-section-header">
+                <span><i class="fa fa-sitemap"></i> 节点库</span>
+                <div class="section-actions">
+                    <button class="icon-btn" onclick="cmd('expandAllCategories')" title="展开全部">
+                        <i class="fa fa-expand"></i>
+                    </button>
+                    <button class="icon-btn" onclick="cmd('collapseAllCategories')" title="折叠全部">
+                        <i class="fa fa-compress"></i>
+                    </button>
+                    <button class="icon-btn" onclick="cmd('importCustomNode')" title="导入自定义节点">
+                        <i class="fa fa-plus"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="node-tree" id="nodeTree">
+                <!-- 动态生成 -->
+            </div>
+
+            <!-- 收藏夹 -->
+            <div class="favorites-section">
+                <div class="panel-section-header">
+                    <span><i class="fa fa-star"></i> 收藏夹</span>
+                    <div class="section-actions">
+                        <button class="icon-btn" onclick="cmd('clearFavorites')" title="清空">
+                            <i class="fa fa-trash-o"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="node-tree" id="favoritesList" style="max-height: 180px; overflow-y: auto;">
+                    <div class="empty-state">
+                        <i class="fa fa-star-o empty-icon"></i>
+                        <div class="empty-text">暂无收藏节点</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 流程模板 -->
+            <div class="templates-section">
+                <div class="panel-section-header" style="margin-bottom: 6px;">
+                    <span><i class="fa fa-book"></i> 流程模板</span>
+                </div>
+                <div id="templatesList">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== 中央画布 ==================== -->
+        <div class="canvas-area">
+            <div class="canvas-wrapper">
+                <canvas id="flowCanvas"></canvas>
+                <svg id="overlaySvg"></svg>
+            </div>
+
+            <!-- 浮动对齐工具栏（多选时显示） -->
+            <div class="align-tools" id="alignTools">
+                <button class="toolbar-btn" onclick="cmd('alignLeft')" title="左对齐"><i class="fa fa-align-left"></i></button>
+                <button class="toolbar-btn" onclick="cmd('alignCenter')" title="水平居中"><i class="fa fa-align-center"></i></button>
+                <button class="toolbar-btn" onclick="cmd('alignRight')" title="右对齐"><i class="fa fa-align-right"></i></button>
+                <button class="toolbar-btn" onclick="cmd('distributeH')" title="水平等距"><i class="fa fa-arrows-h"></i></button>
+                <button class="toolbar-btn" onclick="cmd('distributeV')" title="垂直等距"><i class="fa fa-ellipsis-v"></i></button>
+                <button class="toolbar-btn" onclick="cmd('groupSelected')" title="组合"><i class="fa fa-object-group"></i></button>
+            </div>
+
+            <!-- 小地图 -->
+            <div class="minimap" id="minimap">
+                <div class="minimap-header">
+                    <span>小地图</span>
+                    <button class="icon-btn" onclick="cmd('toggleMinimap')"><i class="fa fa-times"></i></button>
+                </div>
+                <canvas id="minimapCanvas"></canvas>
+            </div>
+
+            <!-- 缩放控制 -->
+            <div class="zoom-control">
+                <button class="toolbar-btn" onclick="cmd('zoomOut')"><i class="fa fa-minus"></i></button>
+                <span class="zoom-value" id="zoomValue">100%</span>
+                <button class="toolbar-btn" onclick="cmd('zoomIn')"><i class="fa fa-plus"></i></button>
+                <button class="toolbar-btn" onclick="cmd('fitToScreen')" title="适应屏幕"><i class="fa fa-expand"></i></button>
+                <button class="toolbar-btn" onclick="cmd('resetView')" title="重置视图"><i class="fa fa-crosshairs"></i></button>
+            </div>
+        </div>
+
+        <!-- ==================== 右侧面板 ==================== -->
+        <div class="right-panel">
+            <!-- 面板标签页 -->
+            <div class="panel-tabs">
+                <div class="panel-tab active" data-pane="params">
+                    <i class="fa fa-sliders tab-icon"></i>
+                    <span>参数</span>
+                </div>
+                <div class="panel-tab" data-pane="preview">
+                    <i class="fa fa-image tab-icon"></i>
+                    <span>预览</span>
+                </div>
+                <div class="panel-tab" data-pane="debug">
+                    <i class="fa fa-bug tab-icon"></i>
+                    <span>调试</span>
+                </div>
+                <div class="panel-tab" data-pane="perf">
+                    <i class="fa fa-tachometer tab-icon"></i>
+                    <span>性能</span>
+                </div>
+                <div class="panel-tab" data-pane="results">
+                    <i class="fa fa-bar-chart tab-icon"></i>
+                    <span>结果</span>
+                </div>
+            </div>
+
+            <div class="panel-content">
+                <!-- 参数面板 -->
+                <div class="panel-pane active" id="pane-params">
+                    <div id="nodeInfo">
+                        <div class="empty-state">
+                            <i class="fa fa-mouse-pointer empty-icon"></i>
+                            <div class="empty-text">请选择一个节点查看参数</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 图像预览面板 -->
+                <div class="panel-pane" id="pane-preview" style="padding: 0; display: none; flex-direction: column;">
+                    <div class="image-preview-header">
+                        <span id="previewTitle">图像预览</span>
+                        <div class="image-preview-controls">
+                            <button class="icon-btn" onclick="cmd('zoomImageIn')" title="放大"><i class="fa fa-search-plus"></i></button>
+                            <button class="icon-btn" onclick="cmd('zoomImageOut')" title="缩小"><i class="fa fa-search-minus"></i></button>
+                            <button class="icon-btn" onclick="cmd('fitImage')" title="适应"><i class="fa fa-expand"></i></button>
+                            <button class="icon-btn" onclick="cmd('toggleRoiMode')" title="ROI"><i class="fa fa-crop"></i></button>
+                            <button class="icon-btn" onclick="cmd('toggleHistogram')" title="直方图"><i class="fa fa-bar-chart"></i></button>
+                            <button class="icon-btn" onclick="cmd('adjustContrast')" title="对比度"><i class="fa fa-adjust"></i></button>
+                        </div>
+                    </div>
+                    <div class="image-preview-wrapper">
+                        <canvas id="imagePreviewCanvas"></canvas>
+                    </div>
+                    <div class="image-info-bar">
+                        <span id="imageInfo">无图像</span>
+                        <span id="imageStats"></span>
+                    </div>
+                </div>
+
+                <!-- 调试面板 -->
+                <div class="panel-pane" id="pane-debug">
+                    <div class="debug-controls">
+                        <button class="toolbar-btn" onclick="cmd('stepOver')" title="跳过">
+                            <i class="fa fa-step-forward"></i> 跳过
+                        </button>
+                        <button class="toolbar-btn" onclick="cmd('stepInto')" title="进入">
+                            <i class="fa fa-arrow-down"></i> 进入
+                        </button>
+                        <button class="toolbar-btn" onclick="cmd('stepOut')" title="退出">
+                            <i class="fa fa-arrow-up"></i> 退出
+                        </button>
+                        <button class="toolbar-btn run" onclick="cmd('continueExec')" title="继续">
+                            <i class="fa fa-play"></i> 继续
+                        </button>
+                    </div>
+
+                    <div class="param-group">
+                        <div class="param-group-header" onclick="cmd('toggleParamGroup', this)">
+                            <i class="fa fa-circle" style="color: var(--accent-error); font-size: 8px;"></i>
+                            断点列表
+                            <i class="fa fa-caret-down caret"></i>
+                        </div>
+                        <div class="param-group-body">
+                            <div id="breakpointsList">
+                                <div class="empty-state">
+                                    <i class="fa fa-circle-o empty-icon"></i>
+                                    <div class="empty-text">无断点</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="param-group">
+                        <div class="param-group-header" onclick="cmd('toggleParamGroup', this)">
+                            <i class="fa fa-cubes"></i>
+                            变量查看
+                            <i class="fa fa-caret-down caret"></i>
+                        </div>
+                        <div class="param-group-body">
+                            <div class="variables-tree" id="variablesTree">
+                                <div class="empty-state">
+                                    <i class="fa fa-cube empty-icon"></i>
+                                    <div class="empty-text">暂无变量</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 性能面板 -->
+                <div class="panel-pane" id="pane-perf">
+                    <div class="param-group">
+                        <div class="param-group-header">
+                            <i class="fa fa-clock-o"></i>
+                            执行统计
+                        </div>
+                        <div class="param-group-body">
+                            <div id="perfSummary" style="font-size: 12px; color: var(--text-secondary);">
+                                <div class="perf-row">
+                                    <span>总耗时:</span>
+                                    <span class="perf-time" id="totalTime">0 ms</span>
+                                </div>
+                                <div class="perf-row">
+                                    <span>节点数:</span>
+                                    <span class="perf-time" id="nodeCount2">0</span>
+                                </div>
+                                <div class="perf-row">
+                                    <span>最慢节点:</span>
+                                    <span class="perf-time" id="slowestNode">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="param-group">
+                        <div class="param-group-header">
+                            <i class="fa fa-tachometer"></i>
+                            节点耗时
+                        </div>
+                        <div class="param-group-body">
+                            <div class="performance-stats" id="perfStats">
+                                <div class="empty-state">
+                                    <i class="fa fa-tachometer empty-icon"></i>
+                                    <div class="empty-text">运行流程后显示</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 结果面板 -->
+                <div class="panel-pane" id="pane-results">
+                    <div id="resultItems">
+                        <div class="empty-state">
+                            <i class="fa fa-bar-chart empty-icon"></i>
+                            <div class="empty-text">暂无执行结果</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== 底部日志面板 ==================== -->
+        <div class="bottom-panel">
+            <div class="bottom-tabs">
+                <div class="bottom-tab active" data-log="console">
+                    <i class="fa fa-terminal"></i> 控制台
+                </div>
+                <div class="bottom-tab" data-log="execution">
+                    <i class="fa fa-cogs"></i> 执行日志
+                </div>
+                <div class="bottom-tab" data-log="errors">
+                    <i class="fa fa-exclamation-triangle"></i> 错误
+                    <span class="badge" id="errorBadge" style="display: none;">0</span>
+                </div>
+                <div class="bottom-tab" data-log="history">
+                    <i class="fa fa-history"></i> 历史
+                </div>
+                <div style="flex:1;"></div>
+                <button class="icon-btn" onclick="cmd('clearLogs')" title="清空日志">
+                    <i class="fa fa-trash"></i>
+                </button>
+                <button class="icon-btn" onclick="cmd('toggleBottomPanel')" title="折叠">
+                    <i class="fa fa-chevron-down"></i>
+                </button>
+            </div>
+            <div class="log-filter">
+                <input type="text" id="logFilter" placeholder="过滤日志...">
+                <button class="filter-btn active" data-level="all">全部</button>
+                <button class="filter-btn" data-level="info">信息</button>
+                <button class="filter-btn" data-level="warn">警告</button>
+                <button class="filter-btn" data-level="error">错误</button>
+                <button class="filter-btn" data-level="debug">调试</button>
+                <label class="param-checkbox" style="font-size: 11px;">
+                    <input type="checkbox" id="autoScroll" checked>
+                    自动滚动
+                </label>
+            </div>
+            <div class="bottom-tab-content">
+                <div class="log-pane active" id="logPane-console"></div>
+                <div class="log-pane" id="logPane-execution"></div>
+                <div class="log-pane" id="logPane-errors"></div>
+                <div class="log-pane" id="logPane-history"></div>
+            </div>
+        </div>
+
+        <!-- ==================== 状态栏 ==================== -->
+        <div class="status-bar">
+            <div class="status-group">
+                <div class="status-item">
+                    <div class="status-indicator ready" id="statusIndicator"></div>
+                    <span class="status-value" id="statusText">就绪</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">流程:</span>
+                    <span class="status-value" id="flowName">未命名</span>
+                </div>
+            </div>
+            <div class="status-group">
+                <div class="status-item">
+                    <i class="fa fa-circle-o" style="color: var(--text-muted);"></i>
+                    <span class="status-label">节点:</span>
+                    <span class="status-value" id="nodeCount">0</span>
+                </div>
+                <div class="status-item">
+                    <i class="fa fa-share-alt" style="color: var(--text-muted);"></i>
+                    <span class="status-label">连接:</span>
+                    <span class="status-value" id="connectionCount">0</span>
+                </div>
+                <div class="status-item">
+                    <i class="fa fa-search" style="color: var(--text-muted);"></i>
+                    <span class="status-label">缩放:</span>
+                    <span class="status-value" id="zoomLevel">100%</span>
+                </div>
+                <div class="status-item">
+                    <i class="fa fa-clock-o" style="color: var(--text-muted);"></i>
+                    <span class="status-label">耗时:</span>
+                    <span class="status-value" id="executionTime">0 ms</span>
+                </div>
+                <div class="status-item">
+                    <i class="fa fa-code-fork" style="color: var(--text-muted);"></i>
+                    <span class="status-value" id="versionInfo">v3.0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== 模态对话框 ==================== -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" id="modalContent"></div>
+    </div>
+
+    <!-- 上下文菜单 -->
+    <div class="context-menu" id="contextMenu"></div>
+
+    <!-- Toast 通知容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- 进度条 -->
+    <div class="progress-overlay" id="progressOverlay">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+            <div class="spinner" id="progressSpinner"></div>
+            <span id="progressTitle">执行中...</span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-text">
+            <span class="progress-percent" id="progressPercent">0%</span>
+            <span id="progressDetail"></span>
+        </div>
+    </div>
+
+    <!-- 快捷键提示 -->
+    <div class="shortcut-overlay" id="shortcutOverlay">
+        <div class="shortcut-dialog">
+            <div class="shortcut-title">
+                <i class="fa fa-keyboard-o"></i>
+                键盘快捷键
+                <button class="icon-btn" style="margin-left: auto;" onclick="cmd('hideShortcuts')">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            <div class="shortcut-grid" id="shortcutGrid"></div>
+        </div>
+    </div>
+
+    <!-- 节点工具提示 -->
+    <div class="node-tooltip" id="nodeTooltip"></div>
+
+    <!-- 文件输入（隐藏） -->
+    <input type="file" id="fileInput" style="display: none;" accept=".json,.png,.jpg,.bmp">
+
+    <!-- 主脚本 -->
+    <script src="editor_pro.js"></script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+{
+    "id": "demo_flow_001",
+    "name": "图像预处理示例流程",
+    "description": "演示图像采集、预处理、边缘检测和Blob分析的完整流程",
+    "version": "1.0",
+    "created_time": "2026-07-04T10:00:00",
+    "modified_time": "2026-07-04T10:00:00",
+    "author": "OVF Developer",
+    "nodes": [
+        {
+            "id": "node_image_source",
+            "type_id": "ImageSource",
+            "name": "图像采集",
+            "x": 100,
+            "y": 100,
+            "enabled": true,
+            "params": {
+                "width": 640,
+                "height": 480,
+                "channels": 1
+            }
+        },
+        {
+            "id": "node_blur",
+            "type_id": "Blur",
+            "name": "均值滤波",
+            "x": 300,
+            "y": 100,
+            "enabled": true,
+            "params": {
+                "kernel_size": 5,
+                "sigma": 1.5
+            },
+            "inputs": {
+                "image": {
+                    "source_node": "node_image_source",
+                    "source_port": "output"
+                }
+            }
+        },
+        {
+            "id": "node_threshold",
+            "type_id": "Threshold",
+            "name": "阈值分割",
+            "x": 500,
+            "y": 100,
+            "enabled": true,
+            "params": {
+                "threshold_value": 128,
+                "threshold_type": "Binary"
+            },
+            "inputs": {
+                "image": {
+                    "source_node": "node_blur",
+                    "source_port": "output"
+                }
+            }
+        },
+        {
+            "id": "node_morphology",
+            "type_id": "Morphology",
+            "name": "形态学处理",
+            "x": 700,
+            "y": 100,
+            "enabled": true,
+            "params": {
+                "operation": "Open",
+                "kernel_shape": "Rect",
+                "kernel_size": 3,
+                "iterations": 2
+            },
+            "inputs": {
+                "image": {
+                    "source_node": "node_threshold",
+                    "source_port": "output"
+                }
+            }
+        },
+        {
+            "id": "node_blob_analysis",
+            "type_id": "BlobAnalysis",
+            "name": "Blob分析",
+            "x": 900,
+            "y": 100,
+            "enabled": true,
+            "params": {
+                "min_area": 100,
+                "max_area": 10000
+            },
+            "inputs": {
+                "image": {
+                    "source_node": "node_morphology",
+                    "source_port": "output"
+                }
+            }
+        },
+        {
+            "id": "node_image_save",
+            "type_id": "ImageSave",
+            "name": "图像保存",
+            "x": 1100,
+            "y": 100,
+            "enabled": true,
+            "params": {
+                "file_path": "output/result.raw",
+                "format": "RAW"
+            },
+            "inputs": {
+                "image": {
+                    "source_node": "node_blob_analysis",
+                    "source_port": "output"
+                }
+            }
+        }
+    ]
+}

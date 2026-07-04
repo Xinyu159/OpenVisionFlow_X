@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenVisionFlow Web Editor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            overflow: hidden;
+        }
+
+        /* 主布局 */
+        .main-container {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* 左侧面板 - 节点工具箱 */
+        .left-panel {
+            width: 280px;
+            background: #181825;
+            border-right: 1px solid #313244;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 搜索框 */
+        .search-box {
+            padding: 10px;
+            background: #11111b;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #45475a;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #89b4fa;
+        }
+
+        /* 节点分类 */
+        .node-categories {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .category {
+            margin-bottom: 10px;
+        }
+
+        .category-header {
+            padding: 8px 12px;
+            background: #313244;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 500;
+        }
+
+        .category-header:hover {
+            background: #45475a;
+        }
+
+        .category-header .icon {
+            transition: transform 0.2s;
+        }
+
+        .category.collapsed .category-header .icon {
+            transform: rotate(-90deg);
+        }
+
+        .category.collapsed .category-items {
+            display: none;
+        }
+
+        .category-items {
+            padding: 5px 0 0 10px;
+        }
+
+        .node-item {
+            padding: 8px 12px;
+            margin: 4px 0;
+            background: #1e1e2e;
+            border-radius: 4px;
+            cursor: grab;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .node-item:hover {
+            border-color: #89b4fa;
+            background: #313244;
+        }
+
+        .node-item.dragging {
+            opacity: 0.5;
+        }
+
+        .node-item .node-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        /* 流程模板 */
+        .templates-section {
+            padding: 10px;
+            border-top: 1px solid #313244;
+        }
+
+        .templates-header {
+            font-weight: 500;
+            padding: 8px;
+            margin-bottom: 5px;
+        }
+
+        .template-item {
+            padding: 8px 12px;
+            background: #1e1e2e;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 4px 0;
+            border: 1px solid transparent;
+        }
+
+        .template-item:hover {
+            border-color: #a6e3a1;
+            background: #313244;
+        }
+
+        /* 中央画布区域 */
+        .canvas-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 工具栏 */
+        .toolbar {
+            height: 40px;
+            background: #11111b;
+            border-bottom: 1px solid #313244;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            gap: 10px;
+        }
+
+        .toolbar-group {
+            display: flex;
+            gap: 5px;
+        }
+
+        .toolbar-btn {
+            padding: 6px 12px;
+            background: #313244;
+            border: none;
+            border-radius: 4px;
+            color: #cdd6f4;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .toolbar-btn:hover {
+            background: #45475a;
+        }
+
+        .toolbar-btn.active {
+            background: #89b4fa;
+            color: #1e1e2e;
+        }
+
+        .toolbar-btn.run {
+            background: #a6e3a1;
+            color: #1e1e2e;
+        }
+
+        .toolbar-btn.run:hover {
+            background: #94e2d5;
+        }
+
+        .toolbar-btn.stop {
+            background: #f38ba8;
+            color: #1e1e2e;
+        }
+
+        .toolbar-btn.stop:hover {
+            background: #eba0ac;
+        }
+
+        .toolbar-separator {
+            width: 1px;
+            height: 24px;
+            background: #45475a;
+        }
+
+        /* 流程画布 */
+        .flow-canvas-wrapper {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #flowCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #1e1e2e;
+        }
+
+        /* SVG覆盖层 - 用于图像预览和ROI绘制 */
+        #overlaySvg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* 小地图 */
+        .minimap {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 150px;
+            height: 100px;
+            background: #181825;
+            border: 1px solid #313244;
+            border-radius: 4px;
+            opacity: 0.8;
+        }
+
+        #minimapCanvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 右侧面板 */
+        .right-panel {
+            width: 300px;
+            background: #181825;
+            border-left: 1px solid #313244;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 面板标签页 */
+        .panel-tabs {
+            display: flex;
+            background: #11111b;
+            border-bottom: 1px solid #313244;
+        }
+
+        .panel-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .panel-tab:hover {
+            background: #313244;
+        }
+
+        .panel-tab.active {
+            border-bottom-color: #89b4fa;
+            background: #1e1e2e;
+        }
+
+        /* 参数面板 */
+        .params-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .param-group {
+            margin-bottom: 15px;
+        }
+
+        .param-group-header {
+            font-weight: 500;
+            padding: 8px;
+            background: #313244;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .param-item {
+            margin-bottom: 10px;
+        }
+
+        .param-label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 13px;
+            color: #a6adc8;
+        }
+
+        .param-input {
+            width: 100%;
+            padding: 6px 10px;
+            background: #1e1e2e;
+            border: 1px solid #45475a;
+            border-radius: 4px;
+            color: #cdd6f4;
+            font-size: 13px;
+        }
+
+        .param-input:focus {
+            outline: none;
+            border-color: #89b4fa;
+        }
+
+        .param-input.error {
+            border-color: #f38ba8;
+        }
+
+        .param-error {
+            color: #f38ba8;
+            font-size: 12px;
+            margin-top: 3px;
+        }
+
+        .param-range {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .param-range input[type="range"] {
+            flex: 1;
+            height: 4px;
+            background: #45475a;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+
+        .param-range-value {
+            width: 60px;
+            text-align: right;
+        }
+
+        .param-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .param-checkbox input {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .param-select {
+            width: 100%;
+            padding: 6px 10px;
+            background: #1e1e2e;
+            border: 1px solid #45475a;
+            border-radius: 4px;
+            color: #cdd6f4;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        /* 图像预览面板 */
+        .image-preview-panel {
+            flex: 1;
+            overflow: hidden;
+            display: none;
+        }
+
+        .image-preview-panel.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .image-preview-header {
+            padding: 10px;
+            background: #11111b;
+            border-bottom: 1px solid #313244;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .image-preview-controls {
+            display: flex;
+            gap: 5px;
+        }
+
+        .image-preview-wrapper {
+            flex: 1;
+            position: relative;
+            overflow: auto;
+            background: #11111b;
+        }
+
+        #imagePreviewCanvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .roi-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .roi-rect {
+            stroke: #89b4fa;
+            stroke-width: 2;
+            fill: rgba(137, 180, 250, 0.2);
+        }
+
+        /* 调试面板 */
+        .debug-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: none;
+        }
+
+        .debug-panel.active {
+            display: block;
+        }
+
+        .debug-controls {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+
+        .debug-controls button {
+            padding: 6px 12px;
+            background: #313244;
+            border: none;
+            border-radius: 4px;
+            color: #cdd6f4;
+            cursor: pointer;
+        }
+
+        .debug-controls button:hover {
+            background: #45475a;
+        }
+
+        .breakpoints-list {
+            margin-bottom: 15px;
+        }
+
+        .breakpoint-item {
+            padding: 8px;
+            background: #1e1e2e;
+            border-radius: 4px;
+            margin: 5px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .breakpoint-item .node-name {
+            color: #89b4fa;
+        }
+
+        .breakpoint-item .remove-btn {
+            color: #f38ba8;
+            cursor: pointer;
+        }
+
+        .variables-view {
+            background: #1e1e2e;
+            border-radius: 4px;
+            padding: 10px;
+        }
+
+        .variable-item {
+            padding: 5px 0;
+            display: flex;
+            gap: 10px;
+        }
+
+        .variable-name {
+            color: #f9e2af;
+        }
+
+        .variable-value {
+            color: #a6e3a1;
+        }
+
+        /* 结果可视化面板 */
+        .results-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: none;
+        }
+
+        .results-panel.active {
+            display: block;
+        }
+
+        .result-item {
+            margin-bottom: 15px;
+            background: #1e1e2e;
+            border-radius: 4px;
+            padding: 10px;
+        }
+
+        .result-header {
+            font-weight: 500;
+            margin-bottom: 10px;
+            color: #89b4fa;
+        }
+
+        .result-chart {
+            width: 100%;
+            height: 200px;
+        }
+
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .result-table th, .result-table td {
+            padding: 6px 10px;
+            border: 1px solid #45475a;
+            text-align: left;
+        }
+
+        .result-table th {
+            background: #313244;
+        }
+
+        /* 底部日志面板 */
+        .bottom-panel {
+            height: 150px;
+            background: #181825;
+            border-top: 1px solid #313244;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .log-tabs {
+            display: flex;
+            background: #11111b;
+            border-bottom: 1px solid #313244;
+        }
+
+        .log-tab {
+            padding: 8px 15px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+
+        .log-tab:hover {
+            background: #313244;
+        }
+
+        .log-tab.active {
+            border-bottom-color: #f9e2af;
+        }
+
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            background: #11111b;
+        }
+
+        .log-entry {
+            padding: 3px 0;
+            display: flex;
+            gap: 10px;
+        }
+
+        .log-time {
+            color: #6c7086;
+        }
+
+        .log-level {
+            width: 50px;
+        }
+
+        .log-level.info { color: #89b4fa; }
+        .log-level.warn { color: #f9e2af; }
+        .log-level.error { color: #f38ba8; }
+        .log-level.debug { color: #a6adc8; }
+
+        .log-message {
+            color: #cdd6f4;
+        }
+
+        /* 状态栏 */
+        .status-bar {
+            height: 25px;
+            background: #11111b;
+            border-top: 1px solid #313244;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            justify-content: space-between;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-indicator.ready { background: #a6e3a1; }
+        .status-indicator.running { background: #f9e2af; }
+        .status-indicator.error { background: #f38ba8; }
+
+        /* 模态对话框 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(17, 17, 27, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #1e1e2e;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 400px;
+            max-width: 600px;
+            border: 1px solid #313244;
+        }
+
+        .modal-header {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 15px;
+            color: #89b4fa;
+        }
+
+        .modal-body {
+            margin-bottom: 15px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .modal-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .modal-btn.primary {
+            background: #89b4fa;
+            color: #1e1e2e;
+        }
+
+        .modal-btn.secondary {
+            background: #45475a;
+            color: #cdd6f4;
+        }
+
+        /* 上下文菜单 */
+        .context-menu {
+            position: fixed;
+            background: #1e1e2e;
+            border-radius: 4px;
+            border: 1px solid #313244;
+            padding: 5px 0;
+            min-width: 150px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .context-menu.active {
+            display: block;
+        }
+
+        .context-menu-item {
+            padding: 8px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .context-menu-item:hover {
+            background: #313244;
+        }
+
+        .context-menu-separator {
+            height: 1px;
+            background: #45475a;
+            margin: 5px 0;
+        }
+
+        /* 节点样式 */
+        .node {
+            position: absolute;
+            background: #313244;
+            border-radius: 8px;
+            border: 2px solid #45475a;
+            min-width: 150px;
+            cursor: move;
+            user-select: none;
+        }
+
+        .node:hover {
+            border-color: #89b4fa;
+        }
+
+        .node.selected {
+            border-color: #89b4fa;
+            box-shadow: 0 0 10px rgba(137, 180, 250, 0.5);
+        }
+
+        .node.running {
+            border-color: #f9e2af;
+            animation: pulse 1s infinite;
+        }
+
+        .node.success {
+            border-color: #a6e3a1;
+        }
+
+        .node.error {
+            border-color: #f38ba8;
+        }
+
+        .node.collapsed {
+            height: 40px;
+        }
+
+        .node.collapsed .node-body {
+            display: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 10px rgba(249, 226, 175, 0.5); }
+            50% { box-shadow: 0 0 20px rgba(249, 226, 175, 0.8); }
+        }
+
+        .node-header {
+            padding: 8px 12px;
+            background: #45475a;
+            border-radius: 6px 6px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .node-title {
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .node-collapse-btn {
+            cursor: pointer;
+            font-size: 12px;
+            color: #89b4fa;
+        }
+
+        .node-body {
+            padding: 10px;
+        }
+
+        .node-status {
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        .node-status .time {
+            color: #6c7086;
+        }
+
+        /* 端口 */
+        .port {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #45475a;
+            border: 2px solid #cdd6f4;
+            position: absolute;
+            cursor: crosshair;
+        }
+
+        .port:hover {
+            background: #89b4fa;
+            transform: scale(1.2);
+        }
+
+        .port.input {
+            left: -6px;
+        }
+
+        .port.output {
+            right: -6px;
+        }
+
+        .port.connected {
+            background: #a6e3a1;
+        }
+
+        .port.image { border-color: #89b4fa; }
+        .port.number { border-color: #f9e2af; }
+        .port.string { border-color: #a6e3a1; }
+        .port.boolean { border-color: #cba6f7; }
+        .port.region { border-color: #f38ba8; }
+
+        /* 连线 */
+        .connection {
+            stroke: #45475a;
+            stroke-width: 2;
+            fill: none;
+            transition: stroke 0.2s;
+        }
+
+        .connection:hover {
+            stroke: #89b4fa;
+            stroke-width: 3;
+        }
+
+        .connection.active {
+            stroke: #f9e2af;
+            animation: flowAnimation 1s linear infinite;
+        }
+
+        @keyframes flowAnimation {
+            from { stroke-dashoffset: 20; }
+            to { stroke-dashoffset: 0; }
+        }
+
+        .connection.image { stroke: #89b4fa; }
+        .connection.number { stroke: #f9e2af; }
+        .connection.string { stroke: #a6e3a1; }
+        .connection.boolean { stroke: #cba6f7; }
+
+        /* 分组框 */
+        .group-box {
+            position: absolute;
+            border: 2px dashed #6c7086;
+            border-radius: 8px;
+            background: rgba(108, 112, 134, 0.1);
+            cursor: move;
+        }
+
+        .group-header {
+            padding: 5px 10px;
+            background: #313244;
+            border-radius: 6px 6px 0 0;
+            font-size: 12px;
+            color: #6c7086;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* 快捷键提示 */
+        .shortcut-hint {
+            position: fixed;
+            bottom: 40px;
+            right: 20px;
+            background: #1e1e2e;
+            border-radius: 4px;
+            padding: 10px 15px;
+            border: 1px solid #313244;
+            font-size: 12px;
+            display: none;
+        }
+
+        .shortcut-hint.active {
+            display: block;
+        }
+
+        .shortcut-item {
+            display: flex;
+            gap: 15px;
+            margin: 5px 0;
+        }
+
+        .shortcut-key {
+            color: #89b4fa;
+            font-weight: 500;
+        }
+
+        /* 进度条 */
+        .progress-overlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #1e1e2e;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #313244;
+            z-index: 1000;
+            display: none;
+        }
+
+        .progress-overlay.active {
+            display: block;
+        }
+
+        .progress-bar {
+            width: 300px;
+            height: 10px;
+            background: #45475a;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #89b4fa;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .progress-text {
+            margin-top: 10px;
+            text-align: center;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 左侧面板 - 节点工具箱 -->
+        <div class="left-panel">
+            <!-- 搜索框 -->
+            <div class="search-box">
+                <input type="text" id="nodeSearch" placeholder="搜索节点..." autocomplete="off">
+            </div>
+
+            <!-- 节点分类 -->
+            <div class="node-categories" id="nodeCategories">
+                <!-- 动态生成 -->
+            </div>
+
+            <!-- 流程模板 -->
+            <div class="templates-section">
+                <div class="templates-header">流程模板</div>
+                <div class="template-item" onclick="loadTemplate('basic_inspection')">基础检测流程</div>
+                <div class="template-item" onclick="loadTemplate('measurement')">测量流程</div>
+                <div class="template-item" onclick="loadTemplate('barcode')">条码识别流程</div>
+                <div class="template-item" onclick="loadTemplate('ocr')">OCR识别流程</div>
+                <div class="template-item" onclick="loadTemplate('alignment')">对位流程</div>
+            </div>
+        </div>
+
+        <!-- 中央画布区域 -->
+        <div class="canvas-container">
+            <!-- 工具栏 -->
+            <div class="toolbar">
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="newFlow()" title="新建流程 (Ctrl+N)">新建</button>
+                    <button class="toolbar-btn" onclick="openFlow()" title="打开流程 (Ctrl+O)">打开</button>
+                    <button class="toolbar-btn" onclick="saveFlow()" title="保存流程 (Ctrl+S)">保存</button>
+                    <button class="toolbar-btn" onclick="exportFlow()" title="导出">导出</button>
+                </div>
+
+                <div class="toolbar-separator"></div>
+
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="undo()" title="撤销 (Ctrl+Z)">撤销</button>
+                    <button class="toolbar-btn" onclick="redo()" title="重做 (Ctrl+Y)">重做</button>
+                    <button class="toolbar-btn" onclick="copyNodes()" title="复制 (Ctrl+C)">复制</button>
+                    <button class="toolbar-btn" onclick="pasteNodes()" title="粘贴 (Ctrl+V)">粘贴</button>
+                    <button class="toolbar-btn" onclick="deleteSelected()" title="删除 (Delete)">删除</button>
+                </div>
+
+                <div class="toolbar-separator"></div>
+
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="zoomIn()" title="放大 (+)">+</button>
+                    <button class="toolbar-btn" onclick="zoomOut()" title="缩小 (-)">-</button>
+                    <button class="toolbar-btn" onclick="fitToScreen()" title="适应屏幕">适应</button>
+                    <button class="toolbar-btn" onclick="toggleGrid()" title="显示网格">网格</button>
+                </div>
+
+                <div class="toolbar-separator"></div>
+
+                <div class="toolbar-group">
+                    <button class="toolbar-btn run" onclick="runFlow()" title="运行流程 (F5)">▶ 运行</button>
+                    <button class="toolbar-btn stop" onclick="stopFlow()" title="停止 (Shift+F5)">■ 停止</button>
+                    <button class="toolbar-btn" onclick="stepFlow()" title="单步执行 (F10)">→ 单步</button>
+                    <button class="toolbar-btn" onclick="toggleDebug()" title="调试模式">调试</button>
+                </div>
+
+                <div class="toolbar-separator"></div>
+
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="toggleMinimap()">小地图</button>
+                    <button class="toolbar-btn" onclick="groupSelected()">分组</button>
+                    <button class="toolbar-btn" onclick="createComment()">注释</button>
+                </div>
+            </div>
+
+            <!-- 流程画布 -->
+            <div class="flow-canvas-wrapper">
+                <canvas id="flowCanvas"></canvas>
+                <svg id="overlaySvg"></svg>
+
+                <!-- 小地图 -->
+                <div class="minimap" id="minimap">
+                    <canvas id="minimapCanvas"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧面板 -->
+        <div class="right-panel">
+            <!-- 面板标签页 -->
+            <div class="panel-tabs">
+                <div class="panel-tab active" onclick="switchPanel('params')">参数</div>
+                <div class="panel-tab" onclick="switchPanel('preview')">预览</div>
+                <div class="panel-tab" onclick="switchPanel('debug')">调试</div>
+                <div class="panel-tab" onclick="switchPanel('results')">结果</div>
+            </div>
+
+            <!-- 参数面板 -->
+            <div class="params-panel active" id="paramsPanel">
+                <div class="param-group">
+                    <div class="param-group-header">节点信息</div>
+                    <div id="nodeInfo">
+                        <p style="color: #6c7086; text-align: center; padding: 20px;">请选择一个节点</p>
+                    </div>
+                </div>
+                <div class="param-group" id="nodeParams" style="display: none;">
+                    <div class="param-group-header">节点参数</div>
+                    <div id="paramItems">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 图像预览面板 -->
+            <div class="image-preview-panel" id="previewPanel">
+                <div class="image-preview-header">
+                    <span>图像预览</span>
+                    <div class="image-preview-controls">
+                        <button class="toolbar-btn" onclick="zoomImageIn()">+</button>
+                        <button class="toolbar-btn" onclick="zoomImageOut()">-</button>
+                        <button class="toolbar-btn" onclick="fitImage()">适应</button>
+                        <button class="toolbar-btn" onclick="toggleRoiMode()">ROI</button>
+                    </div>
+                </div>
+                <div class="image-preview-wrapper">
+                    <canvas id="imagePreviewCanvas"></canvas>
+                </div>
+            </div>
+
+            <!-- 调试面板 -->
+            <div class="debug-panel" id="debugPanel">
+                <div class="debug-controls">
+                    <button onclick="stepOver()">跳过</button>
+                    <button onclick="stepInto()">进入</button>
+                    <button onclick="stepOut()">退出</button>
+                    <button onclick="continueExec()">继续</button>
+                </div>
+
+                <div class="breakpoints-list">
+                    <div class="param-group-header">断点列表</div>
+                    <div id="breakpoints">
+                        <p style="color: #6c7086; padding: 10px;">无断点</p>
+                    </div>
+                </div>
+
+                <div class="variables-view">
+                    <div class="param-group-header">变量查看</div>
+                    <div id="variables">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 结果可视化面板 -->
+            <div class="results-panel" id="resultsPanel">
+                <div id="resultItems">
+                    <p style="color: #6c7086; text-align: center; padding: 20px;">暂无执行结果</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部日志面板 -->
+    <div class="bottom-panel">
+        <div class="log-tabs">
+            <div class="log-tab active" onclick="switchLog('console')">控制台</div>
+            <div class="log-tab" onclick="switchLog('execution')">执行日志</div>
+            <div class="log-tab" onclick="switchLog('errors')">错误</div>
+        </div>
+        <div class="log-content" id="logContent">
+            <!-- 动态生成 -->
+        </div>
+    </div>
+
+    <!-- 状态栏 -->
+    <div class="status-bar">
+        <div class="status-item">
+            <div class="status-indicator ready" id="statusIndicator"></div>
+            <span id="statusText">就绪</span>
+        </div>
+        <div class="status-item">
+            <span>节点: <span id="nodeCount">0</span></span>
+            <span>连接: <span id="connectionCount">0</span></span>
+        </div>
+        <div class="status-item">
+            <span id="zoomLevel">100%</span>
+        </div>
+        <div class="status-item">
+            <span id="executionTime">0ms</span>
+        </div>
+    </div>
+
+    <!-- 进度条 -->
+    <div class="progress-overlay" id="progressOverlay">
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-text" id="progressText">执行中...</div>
+    </div>
+
+    <!-- 模态对话框 -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" id="modalContent">
+            <!-- 动态生成 -->
+        </div>
+    </div>
+
+    <!-- 上下文菜单 -->
+    <div class="context-menu" id="contextMenu">
+        <div class="context-menu-item" onclick="copySelected()">复制 <span style="color: #6c7086">Ctrl+C</span></div>
+        <div class="context-menu-item" onclick="pasteNodes()">粘贴 <span style="color: #6c7086">Ctrl+V</span></div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="deleteSelected()">删除 <span style="color: #6c7086">Delete</span></div>
+        <div class="context-menu-item" onclick="toggleNodeEnabled()">启用/禁用</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="addBreakpoint()">添加断点</div>
+        <div class="context-menu-item" onclick="viewNodeOutput()">查看输出</div>
+        <div class="context-menu-separator"></div>
+        <div class="context-menu-item" onclick="groupSelected()">创建分组</div>
+        <div class="context-menu-item" onclick="ungroupSelected()">取消分组</div>
+    </div>
+
+    <!-- 快捷键提示 -->
+    <div class="shortcut-hint" id="shortcutHint">
+        <div class="shortcut-item"><span class="shortcut-key">Ctrl+N</span><span>新建流程</span></div>
+        <div class="shortcut-item"><span class="shortcut-key">Ctrl+O</span><span>打开流程</span></div>
+        <div class="shortcut-item"><span class="shortcut-key">Ctrl+S</span><span>保存流程</span></div>
+        <div class="shortcut-item"><span class="shortcut-key">Ctrl+C/V</span><span>复制/粘贴</span></div>
+        <div class="shortcut-item"><span class="shortcut-key">Ctrl+Z/Y</span><span>撤销/重做</span></div>
+        <div class="shortcut-item"><span class="shortcut-key">Delete</span><span>删除节点</span></div>
+        <div class="shortcut-item"><span class="shortcut-key">F5</span><span>运行流程</span></div>
+        <div class="shortcut-item"><span class="shortcut-key">F10</span><span>单步执行</span></div>
+    </div>
+
+    <script src="editor_enhanced.js"></script>
+</body>
+</html>
