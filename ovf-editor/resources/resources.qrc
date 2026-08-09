@@ -1,13 +1,13 @@
 <RCC>
     <qresource prefix="/icons">
-        <file>icons/new.png</file>
-        <file>icons/open.png</file>
-        <file>icons/save.png</file>
-        <file>icons/run.png</file>
-        <file>icons/stop.png</file>
-        <file>icons/step.png</file>
-        <file>icons/trigger.png</file>
-        <file>icons/app.png</file>
+        <file>icons/new.jpg</file>
+        <file>icons/open.jpg</file>
+        <file>icons/save.jpg</file>
+        <file>icons/run.jpg</file>
+        <file>icons/stop.jpg</file>
+        <file>icons/step.jpg</file>
+        <file>icons/trigger.jpg</file>
+        <file>icons/app.jpg</file>
     </qresource>
     <qresource prefix="/styles">
         <file>styles/default.qss</file>
