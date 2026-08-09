@@ -430,18 +430,18 @@ void ExecutionControlPanel::setup_ui() {
     auto* btn_layout = new QHBoxLayout();
     
     run_btn_ = new QPushButton("▶ 运行");
-    run_btn_->setIcon(QIcon(":/icons/run.png"));
+    run_btn_->setIcon(QIcon(":/icons/run.jpg"));
     run_btn_->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 8px; }");
     
     stop_btn_ = new QPushButton("■ 停止");
-    stop_btn_->setIcon(QIcon(":/icons/stop.png"));
+    stop_btn_->setIcon(QIcon(":/icons/stop.jpg"));
     stop_btn_->setStyleSheet("QPushButton { background-color: #f44336; color: white; padding: 8px; }");
     
     step_btn_ = new QPushButton("→ 单步");
-    step_btn_->setIcon(QIcon(":/icons/step.png"));
+    step_btn_->setIcon(QIcon(":/icons/step.jpg"));
     
     trigger_btn_ = new QPushButton("⚡ 触发");
-    trigger_btn_->setIcon(QIcon(":/icons/trigger.png"));
+    trigger_btn_->setIcon(QIcon(":/icons/trigger.jpg"));
     
     btn_layout->addWidget(run_btn_);
     btn_layout->addWidget(stop_btn_);
@@ -606,7 +606,7 @@ EditorMainWindow::~EditorMainWindow() {}
 
 void EditorMainWindow::setup_ui() {
     setWindowTitle("OpenVisionFlow Editor");
-    setWindowIcon(QIcon(":/icons/app.png"));
+    setWindowIcon(QIcon(":/icons/app.jpg"));
     
     // 中央画布
     canvas_view_ = new FlowCanvasView(this);
@@ -657,16 +657,16 @@ void EditorMainWindow::setup_menus() {
 void EditorMainWindow::setup_toolbars() {
     // 文件工具栏
     file_toolbar_ = addToolBar("文件");
-    file_toolbar_->addAction(QIcon(":/icons/new.png"), "新建", this, &EditorMainWindow::on_new_flow);
-    file_toolbar_->addAction(QIcon(":/icons/open.png"), "打开", this, &EditorMainWindow::on_open_flow);
-    file_toolbar_->addAction(QIcon(":/icons/save.png"), "保存", this, &EditorMainWindow::on_save_flow);
+    file_toolbar_->addAction(QIcon(":/icons/new.jpg"), "新建", this, &EditorMainWindow::on_new_flow);
+    file_toolbar_->addAction(QIcon(":/icons/open.jpg"), "打开", this, &EditorMainWindow::on_open_flow);
+    file_toolbar_->addAction(QIcon(":/icons/save.jpg"), "保存", this, &EditorMainWindow::on_save_flow);
     
     // 运行工具栏
     run_toolbar_ = addToolBar("运行");
-    run_toolbar_->addAction(QIcon(":/icons/run.png"), "运行", this, &EditorMainWindow::on_run);
-    run_toolbar_->addAction(QIcon(":/icons/stop.png"), "停止", this, &EditorMainWindow::on_stop);
-    run_toolbar_->addAction(QIcon(":/icons/step.png"), "单步", this, &EditorMainWindow::on_step);
-    run_toolbar_->addAction(QIcon(":/icons/trigger.png"), "触发", this, &EditorMainWindow::on_trigger);
+    run_toolbar_->addAction(QIcon(":/icons/run.jpg"), "运行", this, &EditorMainWindow::on_run);
+    run_toolbar_->addAction(QIcon(":/icons/stop.jpg"), "停止", this, &EditorMainWindow::on_stop);
+    run_toolbar_->addAction(QIcon(":/icons/step.jpg"), "单步", this, &EditorMainWindow::on_step);
+    run_toolbar_->addAction(QIcon(":/icons/trigger.jpg"), "触发", this, &EditorMainWindow::on_trigger);
 }
 
 void EditorMainWindow::setup_dock_widgets() {
