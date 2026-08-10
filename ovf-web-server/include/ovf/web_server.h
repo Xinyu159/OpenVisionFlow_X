@@ -146,6 +146,12 @@ public:
      */
     FlowExecutionMonitor::Ptr execution_monitor() const { return execution_monitor_; }
 
+    /**
+     * @brief 设置静态文件目录
+     * @param directory 静态文件根目录
+     */
+    void set_static_dir(const String& directory);
+
 private:
     // 初始化Winsock
     bool init_winsock();
@@ -183,6 +189,9 @@ private:
     // 路径匹配（支持简单通配符）
     bool path_match(const String& pattern, const String& path, std::map<String, String>& captures);
 
+    // 处理静态文件请求
+    void handle_static_file(const HttpRequest& request, HttpResponse& response);
+
 private:
     SOCKET server_socket_;
     int port_;
@@ -198,6 +207,8 @@ private:
     ovf::FlowContext flow_context_;
     FlowExecutionStatus execution_status_;
     FlowExecutionMonitor::Ptr execution_monitor_;
+    
+    String static_dir_;  // 静态文件目录
     
     std::mutex mutex_;
 };

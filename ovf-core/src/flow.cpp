@@ -69,8 +69,11 @@ Result<void> FlowEngine::load_flow(const FlowDef& flow_def) {
         
         node->set_enabled(node_inst.enabled);
 
-        // 设置参数 - 直接使用配置（简化）
-        // 参数由节点自行处理
+        // 设置参数 - 将节点实例的参数传递给节点对象
+        const auto& all_params = node_inst.params.get_all();
+        for (const auto& param_pair : all_params) {
+            node->set_param(param_pair.first, param_pair.second);
+        }
 
         nodes_[node_inst.id] = node;
     }
@@ -425,9 +428,11 @@ FlowResult FlowEngine::execute_node(INode::Ptr node, FlowContext& context) {
     
     auto start_time = std::chrono::high_resolution_clock::now();
     
-    node->reset();
+    // 重置节点状态（但不清空输入，因为上游节点已经传递了数据）
+    node->clear_error();
+    node->state_ = NodeState::Idle;
     
-    // 验证输入
+    // 验证输入（此时上游节点已执行，输入数据已就绪）
     auto validate_result = node->validate_inputs();
     if (validate_result.is_failure()) {
         node->set_error(validate_result.message());

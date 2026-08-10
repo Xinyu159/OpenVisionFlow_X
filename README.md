@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Version](https://img.shields.io/badge/Version-0.2.0-green.svg)](CHANGELOG.md)
-[![Nodes](https://img.shields.io/badge/Nodes-557-orange.svg)](docs/node_reference.md)
+[![Nodes](https://img.shields.io/badge/Nodes-501-orange.svg)](docs/node_reference.md)
 [![Tests](https://img.shields.io/badge/Tests-99.27%25-brightgreen.svg)](docs/test_report_summary.md)
 
 ## 项目简介
@@ -12,7 +12,7 @@ OpenVisionFlow (OVF) 是一个完全开源、跨平台的工业机器视觉平�
 ## 核心特性
 
 - **完全开源免费** - Apache 2.0 协议，无加密狗、无授权限制
-- **557个算子节点** - 图像处理/亚像素精度/OCR/行业检测/CUDA加速
+- **501个算子节点** - 图像处理/亚像素精度/OCR/行业检测/CUDA加速
 - **硬件完全解耦** - 统一 HAL 抽象层，支持全品牌工业相机
 - **算法分层开放** - 底层可改、算子可插拔，源码可见
 - **跨平台支持** - Windows/Linux/国产操作系统
@@ -27,7 +27,7 @@ OpenVisionFlow (OVF) 是一个完全开源、跨平台的工业机器视觉平�
 |------|------|
 | [API参考文档](docs/api_reference.md) | 核心/算法/Python SDK/Web API完整参考 |
 | [用户手册](docs/user_manual.md) | Web编辑器、调试功能、Python SDK使用指南 |
-| [节点参考手册](docs/node_reference.md) | 557个算子节点详细说明 |
+| [节点参考手册](docs/node_reference.md) | 501个算子节点详细说明 |
 | [架构设计文档](docs/architecture.md) | 系统架构、核心设计、扩展机制 |
 | [测试报告汇总](docs/test_report_summary.md) | 273个测试，99.27%通过率 |
 | [版本变更日志](CHANGELOG.md) | Keep a Changelog规范 |
@@ -40,7 +40,7 @@ OpenVisionFlow/
 │   ├── include/ovf/core/   # INode/Data/Result/FlowEngine
 │   └── src/
 │
-├── ovf-algorithm/      # 算法模块（557节点）
+├── ovf-algorithm/      # 算法模块（501节点）
 │   ├── include/ovf/algorithm/
 │   │   ├── subpixel_precision.h   # 亚像素精度
 │   │   ├── chinese_ocr.h          # 汉字OCR
@@ -152,10 +152,12 @@ print(f"检测结果: {result}")
 
 1. 启动服务器: `./build/bin/Release/ovf-web-server.exe`
 2. 打开浏览器: `http://localhost:8080`
-3. 从节点库拖拽节点到画布
+3. 从节点库拖拽节点到画布（501个可用节点）
 4. 连接节点端口
 5. 配置参数
 6. 点击运行
+
+**详细示例**: 参见 [Web编辑器使用指南](docs/web_editor_examples.md)
 
 ### 使用 C++ SDK
 

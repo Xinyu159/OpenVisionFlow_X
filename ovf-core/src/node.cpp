@@ -9,6 +9,50 @@
 
 namespace ovf {
 
+// ============================================================================
+// NodeFactory implementation
+// ============================================================================
+
+NodeFactory& NodeFactory::instance() {
+    static NodeFactory factory;
+    return factory;
+}
+
+void NodeFactory::register_node(const String& type_id, Creator creator, const NodeInfo& info) {
+    creators_[type_id] = creator;
+    infos_[type_id] = info;
+}
+
+INode::Ptr NodeFactory::create(const String& type_id, const String& instance_id) {
+    auto it = creators_.find(type_id);
+    if (it == creators_.end()) {
+        OVF_ERROR() << "Node type not found: " << type_id;
+        return nullptr;
+    }
+    return it->second(instance_id);
+}
+
+const NodeInfo* NodeFactory::get_info(const String& type_id) const {
+    auto it = infos_.find(type_id);
+    return it != infos_.end() ? &it->second : nullptr;
+}
+
+Vector<String> NodeFactory::get_all_types() const {
+    Vector<String> types;
+    for (const auto& pair : creators_) {
+        types.push_back(pair.first);
+    }
+    return types;
+}
+
+bool NodeFactory::has_type(const String& type_id) const {
+    return creators_.find(type_id) != creators_.end();
+}
+
+// ============================================================================
+// INode implementation
+// ============================================================================
+
 INode::INode(const String& instance_id, const NodeInfo& info)
     : instance_id_(instance_id)
     , info_(info) {

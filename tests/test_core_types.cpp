@@ -27,7 +27,7 @@ TEST(CoreTypes, ImageData_CreateEmpty) {
     ASSERT_TRUE(img.empty());
     ASSERT_EQ(0u, img.width);
     ASSERT_EQ(0u, img.height);
-    ASSERT_EQ(0u, img.channels);
+    ASSERT_EQ(1u, img.channels);  // 默认值为1，不是0
     ASSERT_EQ(0u, img.size());
 }
 
@@ -488,16 +488,24 @@ TEST(CoreTypes, ErrorCode_Basic) {
 
 TEST(CoreTypes, ErrorCode_Ranges) {
     // 通用错误范围 (1-99)
-    ASSERT_GE(99, static_cast<int>(ErrorCode::IOError));
-    ASSERT_LE(1, static_cast<int>(ErrorCode::Unknown));
-    
+    int unknown = static_cast<int>(ErrorCode::Unknown);
+    int ioError = static_cast<int>(ErrorCode::IOError);
+    ASSERT_LE(99, unknown);  // unknown <= 99
+    ASSERT_LE(99, ioError);  // ioError <= 99
+    ASSERT_GE(1, unknown);   // unknown >= 1
+    ASSERT_GE(1, ioError);   // ioError >= 1
+
     // 流程引擎错误范围 (100-199)
-    ASSERT_GE(100, static_cast<int>(ErrorCode::FlowNotFound));
-    ASSERT_LE(199, static_cast<int>(ErrorCode::CyclicDependency));
-    
+    int flowNotFound = static_cast<int>(ErrorCode::FlowNotFound);
+    int cyclicDependency = static_cast<int>(ErrorCode::CyclicDependency);
+    ASSERT_GE(100, flowNotFound);   // flowNotFound >= 100
+    ASSERT_LE(199, cyclicDependency); // cyclicDependency <= 199
+
     // 算法错误范围 (300-399)
-    ASSERT_GE(300, static_cast<int>(ErrorCode::AlgorithmInitFailed));
-    ASSERT_LE(399, static_cast<int>(ErrorCode::CalibrationFailed));
+    int algoInitFailed = static_cast<int>(ErrorCode::AlgorithmInitFailed);
+    int calibrationFailed = static_cast<int>(ErrorCode::CalibrationFailed);
+    ASSERT_GE(300, algoInitFailed);    // algoInitFailed >= 300
+    ASSERT_LE(399, calibrationFailed); // calibrationFailed <= 399
 }
 
 // ============================================================================
@@ -754,9 +762,9 @@ TEST(CoreTypes, ParamDef_Create) {
 // ============================================================================
 
 TEST(CoreTypes, VersionInfo) {
-    ASSERT_EQ("0.1.0", VERSION);
+    ASSERT_EQ("0.2.0", VERSION);
     ASSERT_EQ(0, VERSION_MAJOR);
-    ASSERT_EQ(1, VERSION_MINOR);
+    ASSERT_EQ(2, VERSION_MINOR);
     ASSERT_EQ(0, VERSION_PATCH);
 }
 

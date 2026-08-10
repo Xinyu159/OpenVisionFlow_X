@@ -44,12 +44,14 @@ target_include_directories(ovf-web-server
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-core/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-core/thirdparty
+        ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-algorithm/include
 )
 
 # 链接库
 target_link_libraries(ovf-web-server
     PRIVATE
         ovf-core
+        ovf-algorithm
         ws2_32
 )
 

@@ -11,7 +11,7 @@ const OVF_API = {
     endpoints: {
         // 节点相关
         nodes: '/api/nodes',
-        nodeTypes: '/api/nodes/types',
+        nodeTypes: '/api/nodes',  // 修正：使用实际存在的API端点
 
         // 流程相关
         flows: '/api/flows',
@@ -121,7 +121,26 @@ const OVF_API = {
     async getNodeTypes() {
         try {
             const result = await this.get(this.endpoints.nodeTypes);
-            return result;
+
+            // 处理API返回的节点数据格式
+            if (result && result.success && result.nodes) {
+                // 将后端NodeInfo格式转换为前端期望的格式
+                return result.nodes.map(node => ({
+                    type: node.type_id,
+                    name: node.name,
+                    category: node.category,
+                    description: node.description,
+                    icon: this.getNodeIcon(node.category),
+                    color: this.getNodeColor(node.category),
+                    inputs: [],  // 后端返回的节点信息中不包含端口信息，需要单独查询
+                    outputs: [],
+                    params: []
+                }));
+            }
+
+            // 如果返回格式不正确，使用默认类型
+            console.warn('API返回格式不正确，使用默认类型');
+            return this.getDefaultNodeTypes();
         } catch (error) {
             console.warn('获取节点类型失败，使用默认类型:', error);
             return this.getDefaultNodeTypes();
@@ -436,6 +455,72 @@ const OVF_API = {
         } catch (error) {
             return false;
         }
+    },
+
+    /**
+     * 根据分类获取节点图标
+     */
+    getNodeIcon(category) {
+        const iconMap = {
+            '图像采集': '📷',
+            '图像处理': '🎨',
+            '图像分割': '🔲',
+            '特征检测': '🔍',
+            '几何变换': '🔄',
+            '深度学习': '🤖',
+            '测量': '📏',
+            '几何计算': '📐',
+            '数据': '💾',
+            '流程控制': '🔀',
+            '高级': '📜',
+            '视觉检测': '👁️',
+            '工业检测': '🏭',
+            '医药行业': '💊',
+            '食品行业': '🍎',
+            '汽车行业': '🚗',
+            '纺织行业': '🧵',
+            'PCB检测': '🔌',
+            '半导体检测': '⚡',
+            '3D处理': '📦',
+            '立体视觉': '🎯',
+            '手眼标定': '🤖',
+            '通信': '📡',
+            '定位引导': '📍'
+        };
+        return iconMap[category] || '⬜';
+    },
+
+    /**
+     * 根据分类获取节点颜色
+     */
+    getNodeColor(category) {
+        const colorMap = {
+            '图像采集': '#3b82f6',
+            '图像处理': '#6366f1',
+            '图像分割': '#8b5cf6',
+            '特征检测': '#f59e0b',
+            '几何变换': '#a855f7',
+            '深度学习': '#ef4444',
+            '测量': '#14b8a6',
+            '几何计算': '#06b6d4',
+            '数据': '#10b981',
+            '流程控制': '#64748b',
+            '高级': '#f97316',
+            '视觉检测': '#ec4899',
+            '工业检测': '#f43f5e',
+            '医药行业': '#22c55e',
+            '食品行业': '#84cc16',
+            '汽车行业': '#eab308',
+            '纺织行业': '#a3e635',
+            'PCB检测': '#14b8a6',
+            '半导体检测': '#06b6d4',
+            '3D处理': '#8b5cf6',
+            '立体视觉': '#a855f7',
+            '手眼标定': '#f59e0b',
+            '通信': '#64748b',
+            '定位引导': '#ec4899'
+        };
+        return colorMap[category] || '#6b7280';
     }
 };
 

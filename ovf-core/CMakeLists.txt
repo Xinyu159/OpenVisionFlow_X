@@ -1,7 +1,7 @@
 # ovf-core - 微内核核心模块
 cmake_minimum_required(VERSION 3.16)
 
-project(ovf-core VERSION 0.1.0 LANGUAGES CXX)
+project(ovf-core VERSION 0.2.0 LANGUAGES CXX)
 
 # 源文件
 file(GLOB_RECURSE CORE_SOURCES

@@ -5,6 +5,7 @@
 
 #include "ovf/web_server.h"
 #include "ovf/core/logger.h"
+#include "ovf/algorithm/algorithm.h"
 #include <iostream>
 #include <string>
 #include <csignal>
@@ -85,9 +86,19 @@ int main(int argc, char* argv[]) {
     
     std::cout << "OpenVisionFlow Web Server v" << VERSION << std::endl;
     std::cout << "================================" << std::endl;
-    
+
+    // 初始化算法模块
+    OVF_INFO() << "Initializing algorithm module...";
+    ovf::algorithm::initialize_algorithm_module();
+
     // 创建服务器
     g_server = std::make_shared<WebServer>();
+
+    // 设置静态文件目录（Web编辑器前端）
+    // 从构建目录 build/bin/Release 出发，需要 ../../../ovf-web-editor
+    String static_dir = "../../../ovf-web-editor";
+    g_server->set_static_dir(static_dir);
+    OVF_INFO() << "Static files served from: " << static_dir;
     
     // 注册信号处理
     std::signal(SIGINT, signal_handler);

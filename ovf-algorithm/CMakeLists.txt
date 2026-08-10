@@ -27,14 +27,19 @@ endif()
 
 # 根据CUDA可用性设置项目语言
 if(CUDA_AVAILABLE)
-    project(ovf-algorithm VERSION 0.1.0 LANGUAGES CXX CUDA)
+    project(ovf-algorithm VERSION 0.2.0 LANGUAGES CXX CUDA)
 else()
-    project(ovf-algorithm VERSION 0.1.0 LANGUAGES CXX)
+    project(ovf-algorithm VERSION 0.2.0 LANGUAGES CXX)
 endif()
 
 # 源文件（C++）
 file(GLOB_RECURSE ALGO_SOURCES "src/*.cpp")
 file(GLOB_RECURSE ALGO_HEADERS "include/*.h")
+
+# 确保algorithm_init.cpp被包含
+if(NOT ALGO_SOURCES MATCHES "algorithm_init.cpp")
+    list(APPEND ALGO_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/algorithm_init.cpp")
+endif()
 
 # CUDA源文件（如果可用）
 if(CUDA_AVAILABLE)

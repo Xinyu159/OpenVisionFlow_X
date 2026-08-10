@@ -118,49 +118,30 @@ protected:
 
 /**
  * @brief 节点工厂
+ * 
+ * 必须使用__declspec(dllexport)确保DLL/EXE边界只有一个实例
+ * 静态局部变量会导致DLL和EXE各自独立实例，造成节点注册丢失
  */
-class NodeFactory {
+class __declspec(dllexport) NodeFactory {
 public:
     using Creator = std::function<INode::Ptr(const String&)>;
     
-    static NodeFactory& instance() {
-        static NodeFactory factory;
-        return factory;
-    }
+    static NodeFactory& instance();
     
-    void register_node(const String& type_id, Creator creator, const NodeInfo& info) {
-        creators_[type_id] = creator;
-        infos_[type_id] = info;
-    }
+    void register_node(const String& type_id, Creator creator, const NodeInfo& info);
     
-    INode::Ptr create(const String& type_id, const String& instance_id) {
-        auto it = creators_.find(type_id);
-        if (it == creators_.end()) {
-            OVF_ERROR() << "Node type not found: " << type_id;
-            return nullptr;
-        }
-        return it->second(instance_id);
-    }
+    INode::Ptr create(const String& type_id, const String& instance_id);
     
-    const NodeInfo* get_info(const String& type_id) const {
-        auto it = infos_.find(type_id);
-        return it != infos_.end() ? &it->second : nullptr;
-    }
+    const NodeInfo* get_info(const String& type_id) const;
     
-    Vector<String> get_all_types() const {
-        Vector<String> types;
-        for (const auto& pair : creators_) {
-            types.push_back(pair.first);
-        }
-        return types;
-    }
+    Vector<String> get_all_types() const;
     
-    bool has_type(const String& type_id) const {
-        return creators_.find(type_id) != creators_.end();
-    }
+    bool has_type(const String& type_id) const;
 
 private:
     NodeFactory() = default;
+    NodeFactory(const NodeFactory&) = delete;
+    NodeFactory& operator=(const NodeFactory&) = delete;
     
     HashMap<String, Creator> creators_;
     HashMap<String, NodeInfo> infos_;

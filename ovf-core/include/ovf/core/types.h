@@ -2,7 +2,7 @@
  * @file types.h
  * @brief OpenVisionFlow 基础类型定义
  * @author OpenVisionFlow Team
- * @version 0.1.0
+ * @version 0.2.0
  */
 
 #pragma once
@@ -20,9 +20,9 @@
 namespace ovf {
 
 // 版本信息
-constexpr const char* VERSION = "0.1.0";
+constexpr const char* VERSION = "0.2.0";
 constexpr int VERSION_MAJOR = 0;
-constexpr int VERSION_MINOR = 1;
+constexpr int VERSION_MINOR = 2;
 constexpr int VERSION_PATCH = 0;
 
 // 类型别名

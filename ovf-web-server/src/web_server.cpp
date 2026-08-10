@@ -8,6 +8,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -96,6 +97,11 @@ WebServer::WebServer()
 
 WebServer::~WebServer() {
     stop();
+}
+
+void WebServer::set_static_dir(const String& directory) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    static_dir_ = directory;
 }
 
 bool WebServer::init_winsock() {
@@ -299,35 +305,41 @@ void WebServer::handle_client(SOCKET client_socket) {
     // 接收请求
     char buffer[4096];
     int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-    
+
     if (bytes_received <= 0) {
         CLOSE_SOCKET(client_socket);
         return;
     }
-    
+
     buffer[bytes_received] = '\0';
     String raw_request(buffer);
-    
+
     // 解析请求
     HttpRequest request;
     HttpResponse response;
-    
+
     if (!parse_request(raw_request, request)) {
         response.set_error(400, "Invalid HTTP request");
     } else {
-        // 匹配路由并处理
-        ApiHandler handler;
-        if (match_route(request, handler)) {
-            handler(request, response);
+        // 检查是否是API请求
+        if (request.path.substr(0, 5) == "/api/") {
+            // API请求，匹配路由并处理
+            ApiHandler handler;
+            if (match_route(request, handler)) {
+                handler(request, response);
+            } else {
+                response.set_error(404, "API not found: " + request.path);
+            }
         } else {
-            response.set_error(404, "Not found: " + request.path);
+            // 静态文件请求
+            handle_static_file(request, response);
         }
     }
-    
+
     // 发送响应
     String response_str = build_response(response);
     send(client_socket, response_str.c_str(), static_cast<int>(response_str.length()), 0);
-    
+
     CLOSE_SOCKET(client_socket);
 }
 
@@ -514,6 +526,65 @@ nlohmann::json WebServer::parse_json_body(const String& body) {
         OVF_ERROR() << "JSON parse error: " << e.what();
         return nlohmann::json();
     }
+}
+
+void WebServer::handle_static_file(const HttpRequest& request, HttpResponse& response) {
+    // 确定文件路径
+    String file_path = static_dir_;
+    String request_path = request.path;
+
+    // 如果请求路径是根目录，返回index.html
+    if (request_path == "/" || request_path.empty()) {
+        request_path = "/index.html";
+    }
+
+    // 构建完整文件路径
+    file_path += request_path;
+
+    OVF_DEBUG() << "Static file request: " << request_path << " -> " << file_path;
+
+    // 读取文件
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) {
+        OVF_WARN() << "Static file not found: " << file_path;
+        response.set_error(404, "File not found: " + request_path);
+        return;
+    }
+
+    // 读取文件内容
+    std::ostringstream content;
+    content << file.rdbuf();
+    response.body = content.str();
+    file.close();
+
+    // 根据文件扩展名设置Content-Type
+    size_t dot_pos = file_path.find_last_of('.');
+    if (dot_pos != String::npos) {
+        String ext = file_path.substr(dot_pos + 1);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+        if (ext == "html" || ext == "htm") {
+            response.content_type = "text/html; charset=utf-8";
+        } else if (ext == "css") {
+            response.content_type = "text/css; charset=utf-8";
+        } else if (ext == "js") {
+            response.content_type = "application/javascript; charset=utf-8";
+        } else if (ext == "json") {
+            response.content_type = "application/json; charset=utf-8";
+        } else if (ext == "png") {
+            response.content_type = "image/png";
+        } else if (ext == "jpg" || ext == "jpeg") {
+            response.content_type = "image/jpeg";
+        } else if (ext == "gif") {
+            response.content_type = "image/gif";
+        } else if (ext == "svg") {
+            response.content_type = "image/svg+xml";
+        } else {
+            response.content_type = "application/octet-stream";
+        }
+    }
+
+    OVF_DEBUG() << "Static file served: " << file_path << " (" << response.body.size() << " bytes)";
 }
 
 } // namespace web

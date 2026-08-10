@@ -60,6 +60,10 @@ else()
     message(STATUS "Qt6 not found - editor will be disabled")
 endif()
 
+# CUDA默认禁用（需要完整工具集）
+option(ENABLE_CUDA "Enable CUDA acceleration" OFF)
+message(STATUS "CUDA acceleration: ${ENABLE_CUDA}")
+
 # 全局定义
 add_compile_definitions(OVF_VERSION="${PROJECT_VERSION}")
 add_compile_definitions(OVF_PROJECT_NAME="${PROJECT_NAME}")
