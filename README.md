@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Version](https://img.shields.io/badge/Version-0.2.0-green.svg)](CHANGELOG.md)
 [![Nodes](https://img.shields.io/badge/Nodes-501-orange.svg)](docs/node_reference.md)
-[![Tests](https://img.shields.io/badge/Tests-99.27%25-brightgreen.svg)](docs/test_report_summary.md)
+[![Tests](https://img.shields.io/badge/Tests-100%25-brightgreen.svg)](docs/test_report_after_fix.md)
 
 ## 项目简介
 
@@ -28,8 +28,10 @@ OpenVisionFlow (OVF) 是一个完全开源、跨平台的工业机器视觉平�
 | [API参考文档](docs/api_reference.md) | 核心/算法/Python SDK/Web API完整参考 |
 | [用户手册](docs/user_manual.md) | Web编辑器、调试功能、Python SDK使用指南 |
 | [节点参考手册](docs/node_reference.md) | 501个算子节点详细说明 |
+| [Web编辑器示例](docs/web_editor_examples.md) | 5个完整图像处理流程示例 |
 | [架构设计文档](docs/architecture.md) | 系统架构、核心设计、扩展机制 |
-| [测试报告汇总](docs/test_report_summary.md) | 273个测试，99.27%通过率 |
+| [测试报告](docs/test_report_after_fix.md) | 107个单元测试，100%通过率 |
+| [依赖说明](docs/DEPENDENCIES.md) | 项目依赖及环境配置指南 |
 | [版本变更日志](CHANGELOG.md) | Keep a Changelog规范 |
 
 ## 项目结构
@@ -67,8 +69,10 @@ OpenVisionFlow/
 │   ├── api_reference.md
 │   ├── user_manual.md
 │   ├── node_reference.md
+│   ├── web_editor_examples.md
 │   ├── architecture.md
-│   └── test_report_summary.md
+│   ├── DEPENDENCIES.md
+│   └── test_report_after_fix.md
 │
 ├── CHANGELOG.md        # 版本变更日志
 └── README.md           # 本文件
@@ -210,7 +214,8 @@ int main() {
 
 | 模块 | 测试数 | 通过率 |
 |------|--------|--------|
-| CoreTypes | 63 | 96.8% |
+| CoreTypes | 63 | **100%** |
+| FlowEngine | 44 | **100%** |
 | CudaAccelerator | 37 | **100%** |
 | Debugger | 73 | **100%** |
 | AutomotiveInspection | 55 | **100%** |
