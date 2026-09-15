@@ -123,6 +123,12 @@ int main(int argc, char* argv[]) {
     OVF_INFO() << "Initializing algorithm module...";
     ovf::algorithm::initialize_algorithm_module();
 
+    // 注册表摘要：节点类型数 / type_id 冲突 / 元数据问题数。
+    // 放在这里而不是 initialize_algorithm_module() 里面，是因为后者在
+    // ovf-algorithm/ —— 那个目录要对上游保持零 diff。
+    // 冲突数非 0 意味着有算子被静默丢弃，这一行就是发现它的地方。
+    ovf::NodeFactory::instance().log_summary();
+
     // 创建服务器
     g_server = std::make_shared<WebServer>();
 

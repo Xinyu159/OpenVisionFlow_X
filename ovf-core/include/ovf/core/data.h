@@ -191,10 +191,17 @@ struct DataPort {
     Data default_value;     // 默认值
     String description;     // 描述
     
-    DataPort(const String& id, const String& name, DataType type, 
+    DataPort(const String& id, const String& name, DataType type,
              bool required = false, const Data& default_val = Data{})
-        : id(id), name(name), data_type(type), required(required), 
+        : id(id), name(name), data_type(type), required(required),
           default_value(default_val) {}
+
+    // ---- 链式构造器（只增不改：501 处既有的 4 参数调用点一行都不用动）----
+    // 用法： DataPort("image", "输入图像", DataType::Image, true).doc("单通道或三通道")
+    DataPort& doc(const String& text)       { description = text;   return *this; }
+    DataPort& default_to(const Data& value) { default_value = value; return *this; }
+    DataPort& mandatory()                   { required = true;      return *this; }
+    DataPort& optional()                    { required = false;     return *this; }
 };
 
 /**
@@ -213,6 +220,20 @@ struct ParamDef {
     ParamDef(const String& id, const String& name, DataType type,
              const Data& default_val = Data{})
         : id(id), name(name), type(type), default_value(default_val) {}
+
+    // ---- 链式构造器（只增不改）----
+    // 用法： ParamDef("threshold", "阈值", DataType::Number, Data(128)).range(0, 255).doc("二值化阈值")
+    //
+    // range() 是重点：原先 min_value/max_value 没有任何途径能在构造时写进去，
+    // 所以 501 个算子几乎全都没声明过参数范围 —— 这正是 sampling_interval=0
+    // 能一路走到死循环的根因。新算子从第一天起就应该声明范围。
+    ParamDef& doc(const String& text)       { description = text;    return *this; }
+    ParamDef& default_to(const Data& value) { default_value = value; return *this; }
+    ParamDef& range(double lo, double hi)   { min_value = Data(lo); max_value = Data(hi); return *this; }
+    ParamDef& min_value_of(double lo)       { min_value = Data(lo);  return *this; }
+    ParamDef& max_value_of(double hi)       { max_value = Data(hi);  return *this; }
+    // 成员叫 options，函数不能再叫 options，故取名 choices
+    ParamDef& choices(const Vector<String>& opts) { options = opts; return *this; }
 };
 
 /**
