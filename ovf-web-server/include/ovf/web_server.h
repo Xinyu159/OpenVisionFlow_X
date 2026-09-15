@@ -187,8 +187,11 @@ private:
     // 接受连接
     void accept_connections();
     
-    // 处理客户端连接
+    // 处理客户端连接。
+    // handle_client 是 detach() 出去的**线程入口**，负责兜住一切异常并保证
+    // socket 被关闭；真正的处理在 handle_client_inner。
     void handle_client(SOCKET client_socket);
+    void handle_client_inner(SOCKET client_socket);
     
     // 解析HTTP请求
     bool parse_request(const String& raw_request, HttpRequest& request);
