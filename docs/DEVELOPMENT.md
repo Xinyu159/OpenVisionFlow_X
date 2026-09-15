@@ -39,6 +39,16 @@ git push origin main
 > 注意是 `socks5h`（h = DNS 也在代理侧解析），不是 `socks5`。
 > 另外已全局设了 `http.version=HTTP/1.1` —— HTTP/2 在这台机器上也会被重置。
 >
+> **代理是偶发的**：同一条命令可能连成功三次、第四次就握手失败。推送包一层重试：
+> ```bash
+> for i in 1 2 3 4 5; do
+>   git push origin main && break
+>   echo "第 $i 次失败，重试…"; sleep 3
+> done
+> ```
+> 另外别用 `curl` 能不能通来判断 git 能不能通 —— curl 是 OpenSSL 后端、
+> git 是 gnutls，两者行为不一样。
+>
 > 凭据走 `credential.helper=store`（`~/.git-credentials`，600 权限，不在仓库里）。
 > 令牌是 classic PAT，撤销后重新生成，然后：
 > ```bash
