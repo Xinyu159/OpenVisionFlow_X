@@ -9,6 +9,14 @@
 
 OpenVisionFlow (OVF) 是一个完全开源、跨平台的工业机器视觉平台，对标 VisionMaster/Halcon/VisionPro，解决其算法弱、封闭、硬件绑定、授权受限等核心问题。
 
+> ### 关于这个仓库
+>
+> 这是 **[上游项目](https://gitcode.com/hunyuan2026/OpenVisionFlow)（Apache-2.0）的衍生版本**，不是从零自研。
+> 上游提供了整体架构与全部 501 个算子；本仓库在此之上做的是 **Linux 可移植性修复**，
+> 以及一套**算子开发加固**（注册逻辑、崩溃防护、算子体检流水线）。
+> 原项目的版权与许可见 [LICENSE](LICENSE)。上游更新走 `git fetch upstream`，
+> 详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+
 ## 核心特性
 
 - **完全开源免费** - Apache 2.0 协议，无加密狗、无授权限制

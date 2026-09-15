@@ -1,0 +1,226 @@
+# OpenVisionFlow 开发指南
+
+写给「要在这个平台上长期慢慢写算子」的人（也就是我自己）。
+
+---
+
+## 一、仓库与远程
+
+| 远程名 | 地址 | 用途 |
+|---|---|---|
+| `origin` | `https://github.com/Xinyu159/OpenVisionFlow_X` | **我的仓库，日常开发都推这里** |
+| `upstream` | `https://gitcode.com/hunyuan2026/OpenVisionFlow` | 原项目，**只用于拉上游更新**，不推 |
+
+```bash
+# 拉上游的新算子 / 修复（只读）
+git fetch upstream
+git log --oneline upstream/main ^main      # 看上游多了什么
+git cherry-pick <sha>                       # 只挑想要的
+
+# 日常
+git push origin main
+```
+
+> **网络**：本机直连 `github.com` 会被 TLS 重置（挂满超时）。git 也必须走代理，
+> 且要注意 —— **代理只能通过环境变量给**，写进 `git config http.<url>.proxy` 反而会
+> 让 gnutls 握手失败。
+> ```bash
+> export https_proxy=http://127.0.0.1:17897 http_proxy=http://127.0.0.1:17897
+> ```
+> 已经全局设了 `http.version=HTTP/1.1`（HTTP/2 在这台机器上同样会被重置）。
+
+---
+
+## 二、分支模型
+
+```
+main        平台主干。永远可构建、可运行。只接受「已完成并验过」的东西。
+ │
+ ├── hardening    本轮平台加固（阶段 1–8）。做完合回 main，然后删掉。
+ │
+ └── op/<名字>    以后每写一个算子开一条，例如 op/wafer-edge-find
+                  写完 → 编过 → 体检过 → 合回 main → 删分支
+```
+
+**为什么给算子单开分支**：这个仓库的定位是「平台」。算子写到一半编不过、
+或者把 `NodeFactory` 改坏了，`main` 必须还是好的 —— 否则连编辑器都起不来，
+查问题会变成在坏掉的平台上查坏掉的算子。
+
+小改动（改个注释、修个笔误）直接上 `main` 就行，不用开分支。
+
+**里程碑打 tag**：
+
+```bash
+git tag -a v0.2-hardened -m "平台加固完成：注册加固 + 引擎防崩 + 新算子流水线"
+git push origin v0.2-hardened
+```
+
+已有 tag：`baseline-501` = 上游 501 个算子 + Linux 可移植性修复。
+
+---
+
+## 三、写一个新算子
+
+> ⚠️ 这套流程依赖阶段 4/7 建好的 `ovf-nodes/` 模块和 `new_node.sh`，**目前还没建**。
+> 在那之前，新算子先参照 `ovf-algorithm/src/geometry.cpp` 里 `RotateNode` 的写法，
+> 放在自己新建的目录里，不要改 `ovf-algorithm/`（见下方约束）。
+
+```bash
+git checkout main && git pull
+git checkout -b op/my-operator
+
+./ovf-nodes/tools/new_node.sh MyOperator --type MyOperator
+# 编辑 ovf-nodes/src/MyOperator.cpp
+cmake --build build -j16
+./build/bin/ovf-node-audit --only MyOperator     # 必须 A 档
+LD_LIBRARY_PATH=build/lib ctest --test-dir build/tests
+
+git add -A && git commit
+git checkout main && git merge --no-ff op/my-operator
+```
+
+---
+
+## 四、算子注册机制（**必读，这是最容易踩的坑**）
+
+### 4.1 注册是「静态初始化期自注册」
+
+```cpp
+OVF_REGISTER_NODE(MyOperator, "MyOperator", MyOperator::make_info())
+```
+
+这个宏展开成一个匿名 namespace 里的结构体，它的**构造函数**在共享库被加载时自动跑，
+往 `NodeFactory` 单例里登记。**没有一个集中的注册表文件**，所以：
+
+- 加算子不需要改任何 CMake 的源文件列表之外的东西
+- 但也意味着 **「这个算子有没有注册上」在编译期是看不出来的**
+
+### 4.2 `--as-needed` 会把你的算子整库丢掉
+
+`libovf-algorithm.so` 靠的就是静态自注册。如果链接方**没有引用它任何符号**，
+Ubuntu 的 gcc 默认 `--as-needed` 会**把整个库丢掉** → 静态初始化不跑 →
+501 个算子一个不剩，而**链接期零警告**，运行时只报 `Node type 'X' not found`。
+
+三层防御（阶段 4 建，**消费方永远只链 `ovf-nodes-link`，不要直接链 `ovf-nodes`**）：
+
+1. `ovf-nodes-link` 这个 INTERFACE target 自动把库包在
+   `-Wl,--no-as-needed` … `-Wl,--as-needed` 中间
+2. `initialize_user_nodes()` —— ODR-use 一个符号，库自然被保留
+3. `require_user_nodes()` —— 运行时断言，失败时抛出可操作的信息，
+   **绝不允许静默少一个节点**
+
+> 本机 CMake 是 3.22.1，**用不了** `$<LINK_LIBRARY:WHOLE_ARCHIVE>`（需要 ≥3.24）。
+> 而且那是静态库的概念，共享库的正解就是 `--no-as-needed`。
+
+### 4.3 重名不再静默覆盖（阶段 1 已加固）
+
+`type_id` 重复注册时：
+
+- **首次写入者获胜**，后来的**不生效**
+- 冲突记进 `NodeFactory::conflicts()`，并打一条 `ERROR` 日志，
+  带**两个注册点的 `文件:行`**
+- 想故意覆盖老算子，用 `RegistrationPolicy::Replace` 显式申请
+
+为什么是 first-wins 而不是后来者覆盖：注册发生在**静态初始化期，链接顺序不保证**，
+「后来者覆盖」等于把结果交给运气；first-wins 至少结果是确定的，而且冲突被保留下来可查。
+
+### 4.4 新算子用 STRICT
+
+```cpp
+// 老算子（od 上游 501 个）用这个：元数据问题只记录、只告警
+OVF_REGISTER_NODE(MyOperator, "MyOperator", MyOperator::make_info())
+
+// 我自己的新算子用这个：元数据问题在启动自检时升级为致命
+OVF_REGISTER_NODE_STRICT(MyOperator, "MyOperator", MyOperator::make_info())
+```
+
+启动时 `assert_no_strict_violations()` 会把所有问题**一次列全**（含 `文件:行`），
+而不是在静态初始化期当场抛 —— 后者只会得到一句 `terminate called after throwing...`
+和 SIGABRT，看不到是哪个算子、违反了哪条规则。
+
+### 4.5 写 `make_info()` 时注意
+
+用链式构造器，**501 处老调用点一行没动、也不会动**：
+
+```cpp
+static NodeInfo make_info() {
+    NodeInfo info;
+    info.id          = "MyOperator";
+    info.name        = "我的算子";
+    info.category    = "自定义";
+    info.description = "……";
+    info.version     = "1.0.0";
+    info.author      = "马欣语";
+
+    info.inputs.push_back(
+        DataPort("image", "输入图像", DataType::Image, true).doc("单通道或三通道"));
+    info.outputs.push_back(
+        DataPort("result", "结果", DataType::Region).doc("检出的区域"));
+
+    info.params.push_back(
+        ParamDef("threshold", "阈值", DataType::Number, Data(128))
+            .range(0, 255)                    // ★ 一定要声明范围
+            .doc("二值化阈值"));
+    return info;
+}
+```
+
+**`.range()` 是重点。** 原先 `min_value`/`max_value` 在构造函数里根本没有参数能传进去，
+所以 501 个老算子几乎全部没声明过参数范围 —— 这正是 `sampling_interval = 0`
+能一路走到死循环的根因。新算子从第一天起就该声明。
+
+### 4.6 元数据校验规则 V1–V15
+
+`NodeFactory::register_node` 会跑一遍校验，**只报告、绝不拒绝注册**：
+
+| 级别 | 规则 | 打什么日志 |
+|---|---|---|
+| Error | V1 id 空 / V2 id ≠ type_id / V3 name 空 / V4–V6 端口参数 id 空 / V7–V9 id 重复 / V10 默认值类型不符 / V11 min·max 非数值 / V12 min > max / V13 选项含空串 / V14 非 String 类型带字符串 options | `WARN` |
+| Note | V15 缺 category/description/version/author | `DEBUG`（默认不显示，免得刷屏） |
+
+---
+
+## 五、提交前检查清单
+
+```bash
+# 1. 编过
+cmake --build build -j16
+
+# 2. 测试（注意是 build/tests，直接 --test-dir build 会报 "No tests were found"）
+LD_LIBRARY_PATH=build/lib ctest --test-dir build/tests --output-on-failure
+
+# 3. 没动上游
+git diff baseline-501 --stat -- ovf-algorithm     # 必须为空
+
+# 4. 注册表摘要（冲突数非 0 就要查）
+./build/bin/ovf-web-server -p 18090 &             # 启动日志里有 NodeFactory 那一行
+```
+
+**已知的基线失败（不是我弄坏的）**：
+
+- `SubpixelPrecisionTest`、`ChineseOCRTest` —— 一直是失败的
+- `AllTests` —— 会挂死（`tests/test_all.cpp:447-477` 有 8 个自递归，`-O3` 下变成死循环），阶段 8 修
+
+**判据**：这两个失败**不是回归**；`FlowEngineTest` 失败、或者多出新的失败，**就是回归**，必须停下来查。
+
+---
+
+## 六、硬约束（别越界）
+
+1. **501 个老算子继续能编过、能跑** —— 611 处 `get_input(`、1511 处 `get_param(` 一个都不动，新增 API 只能「只加不改」
+2. **老算子的算法数值不许变**
+3. **`ovf-algorithm/` 不改** —— 对上游保持零 diff；新算子落在 `ovf-nodes/`
+4. **不摘任何算子** —— 体检结论只做运行时标注，501 个全部保持注册、可调用
+
+---
+
+## 七、已知的真缺陷（阶段 1 体检查出来的，还没修）
+
+| 规则 | 数量 | 位置 | 问题 |
+|---|---|---|---|
+| V2 | 14 | `ovf-algorithm/src/pcl_3d_reconstruction.cpp:3134-3147` | 注册名是 `PointCloudFromDepth`，`info().id` 却是 `pcl_pointcloud_from_depth`。**实测 `create(info().id)` 14/14 全部失败**。任何拿 `info().id` 再喂回 `create()` 的地方（`api_handlers.cpp:460` 的 `n["type"]`、`:865` 的 `node_type`）拿到的是个查不到的名字 |
+| V9 | 1 | `ovf-algorithm/src/barcode.cpp:3281` | `BarcodeGrade` 参数 id `standard` 重复。`params_` 是 map，两个默认值里有一个**静默丢失** |
+| V14 | 8 | `pcl_3d_reconstruction.cpp`、`ocr.cpp:466`、`3d_advanced.cpp:2096` 等 | 参数声明 `type=Number` 却带字符串 `options`，前端画不出控件（前端不会把 Number+options 渲染成下拉框 —— 转了会把存的整数下标悄悄换成字符串） |
+
+全部 501 个算子的体检结论：**501 registered / 0 type_id 冲突 / 512 条元数据问题（23 error + 489 note）**。
+修不修见任务「阶段 6」。
