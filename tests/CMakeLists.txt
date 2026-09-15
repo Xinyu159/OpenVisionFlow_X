@@ -116,13 +116,22 @@ target_link_libraries(test_all
     ovf-algorithm
 )
 
+# 10. 写算子的安全带 API（阶段 3：in_image / p_num / step_ok / OVF_TRY_IN）
+add_executable(test_node_helpers
+    test_node_helpers.cpp
+)
+target_link_libraries(test_node_helpers
+    ovf-core
+    ovf-algorithm
+)
+
 # ============================================================================
 # 输出目录配置
 # ============================================================================
 if(WIN32)
     set_target_properties(test_core_types test_flow_engine test_subpixel_precision
         test_chinese_ocr test_wafer_inspection test_automotive_inspection
-        test_cuda_accelerator test_debugger test_all
+        test_cuda_accelerator test_debugger test_all test_node_helpers
         PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/Release"
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/Debug"
@@ -130,7 +139,7 @@ if(WIN32)
 else()
     set_target_properties(test_core_types test_flow_engine test_subpixel_precision
         test_chinese_ocr test_wafer_inspection test_automotive_inspection
-        test_cuda_accelerator test_debugger test_all
+        test_cuda_accelerator test_debugger test_all test_node_helpers
         PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
@@ -151,6 +160,7 @@ add_test(NAME AutomotiveInspectionTest COMMAND test_automotive_inspection)
 add_test(NAME CUDAAcceleratorTest COMMAND test_cuda_accelerator)
 add_test(NAME DebuggerTest COMMAND test_debugger)
 add_test(NAME AllTests COMMAND test_all)
+add_test(NAME NodeHelpersTest COMMAND test_node_helpers)
 
 # ============================================================================
 # 安装配置
@@ -165,6 +175,7 @@ install(TARGETS
     test_cuda_accelerator
     test_debugger
     test_all
+    test_node_helpers
     RUNTIME DESTINATION bin
 )
 
@@ -180,7 +191,7 @@ add_custom_target(run_all_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --verbose
     DEPENDS test_core_types test_flow_engine test_subpixel_precision
             test_chinese_ocr test_wafer_inspection test_automotive_inspection
-            test_cuda_accelerator test_debugger test_all
+            test_cuda_accelerator test_debugger test_all test_node_helpers
     COMMENT "Running all OpenVisionFlow tests..."
 )
 

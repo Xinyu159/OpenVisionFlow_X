@@ -7,6 +7,8 @@
 #include "ovf/core/flow.h"
 #include <chrono>
 #include <algorithm>
+#include <cmath>
+#include <sstream>
 
 namespace ovf {
 
@@ -539,6 +541,351 @@ void INode::clear_error() {
 
 void INode::record_execute_time(uint64_t microseconds) {
     last_execute_time_ = microseconds;
+}
+
+// ============================================================================
+// 写算子的安全带
+//
+// 全部是新增 API。501 个老算子继续用 get_input/get_param，一行没动。
+// ============================================================================
+
+namespace {
+
+/// 在节点声明里按 id 找输入端口；找不到返回 nullptr（= 端口名拼错了）
+const DataPort* find_input_port(const NodeInfo& info, const String& id) {
+    for (const auto& p : info.inputs) {
+        if (p.id == id) return &p;
+    }
+    return nullptr;
+}
+
+/// 在节点声明里按 id 找参数定义；找不到返回 nullptr
+const ParamDef* find_param_def(const NodeInfo& info, const String& id) {
+    for (const auto& p : info.params) {
+        if (p.id == id) return &p;
+    }
+    return nullptr;
+}
+
+/// 把 id 列表拼成 "a, b, c" —— 报错时告诉对方**到底有哪些**，省一轮翻代码
+String join_ids(const Vector<String>& ids) {
+    if (ids.empty()) return "(none)";
+    String s;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (i) s += ", ";
+        s += ids[i];
+    }
+    return s;
+}
+
+String join_input_ids(const Vector<DataPort>& ports) {
+    Vector<String> ids;
+    ids.reserve(ports.size());
+    for (const auto& p : ports) ids.push_back(p.id);
+    return join_ids(ids);
+}
+
+String join_param_ids(const Vector<ParamDef>& params) {
+    Vector<String> ids;
+    ids.reserve(params.size());
+    for (const auto& p : params) ids.push_back(p.id);
+    return join_ids(ids);
+}
+
+/// "Node 'blur_1'" —— 每条错误消息都必须带它，否则同名节点一多就不知道是谁
+String who_of(const String& instance_id) {
+    return "Node '" + instance_id + "'";
+}
+
+/// 数字的可读形式：走 stream 默认格式，不会打出 "0.000000" 这种噪声
+String num_str(double v) {
+    std::ostringstream oss;
+    oss << v;
+    return oss.str();
+}
+
+/// 按给定边界夹取（has_lo/has_hi 为 false 表示那一侧不限）
+double clamp_value(double v, bool has_lo, double lo, bool has_hi, double hi) {
+    if (has_lo && v < lo) return lo;
+    if (has_hi && v > hi) return hi;
+    return v;
+}
+
+/**
+ * @brief 取值 + 类型检查，类型不符就报「期望 X，实际是 Y」
+ *
+ * get 故意返回**可变引用**：这样上面能用 move 把它搬进 Result，
+ * 而不是让整幅图像在 Result 构造里再拷一次。
+ */
+template <typename T, typename Check, typename Get>
+Result<T> extract_typed(Data& data, const String& who, const String& port,
+                        const char* expected, Check check, Get get) {
+    if (!check(data)) {
+        return Result<T>::failure(
+            ErrorCode::InvalidData,
+            who + ": input '" + port + "' expects " + expected +
+            ", got " + data_type_name(data.type()));
+    }
+    return Result<T>::success(std::move(get(data)));
+}
+
+} // namespace
+
+Result<Data> INode::in_data(const String& port) {
+    const String who = who_of(instance_id_);
+
+    auto it = inputs_.find(port);
+    if (it != inputs_.end() && !it->second.is_none()) {
+        return Result<Data>::success(it->second);
+    }
+
+    // 拿不到数据的三种原因，修法完全不同，所以分开报：
+    const DataPort* def = find_input_port(info_, port);
+    if (!def) {
+        // ① 端口压根没声明过 —— 几乎总是算子代码里把端口名写错了
+        return Result<Data>::failure(
+            ErrorCode::NotFound,
+            who + ": no input port named '" + port + "'. Declared inputs: " +
+            join_input_ids(info_.inputs));
+    }
+    if (!def->default_value.is_none()) {
+        // ② 没连线，但端口声明了默认值 —— 与 get_input() 的既有语义保持一致
+        return Result<Data>::success(def->default_value);
+    }
+    // ③ 声明了、没默认值，但拿不到数据
+    //   （没连线，或者连了而上游这一轮什么都没产出 —— 两种都可能）
+    return Result<Data>::failure(
+        ErrorCode::InvalidData,
+        who + ": input port '" + port + "' has no data"
+        " (not connected, or the upstream node produced nothing)");
+}
+
+Result<ImageData> INode::in_image(const String& port) {
+    auto data = in_data(port);
+    if (!data) return Result<ImageData>::failure(data.code(), data.message());
+    return extract_typed<ImageData>(*data, who_of(instance_id_), port, "Image",
+        [](const Data& d) { return d.is_image(); },
+        [](Data& d) -> ImageData& { return d.as_image(); });
+}
+
+Result<Region> INode::in_region(const String& port) {
+    auto data = in_data(port);
+    if (!data) return Result<Region>::failure(data.code(), data.message());
+    return extract_typed<Region>(*data, who_of(instance_id_), port, "Region",
+        [](const Data& d) { return d.is_region(); },
+        [](Data& d) -> Region& { return const_cast<Region&>(d.as_region()); });
+}
+
+Result<PointCloudData> INode::in_pointcloud(const String& port) {
+    auto data = in_data(port);
+    if (!data) return Result<PointCloudData>::failure(data.code(), data.message());
+    return extract_typed<PointCloudData>(*data, who_of(instance_id_), port, "PointCloud",
+        [](const Data& d) { return d.is_pointcloud(); },
+        [](Data& d) -> PointCloudData& { return const_cast<PointCloudData&>(d.as_pointcloud()); });
+}
+
+Result<DepthImageData> INode::in_depth_image(const String& port) {
+    auto data = in_data(port);
+    if (!data) return Result<DepthImageData>::failure(data.code(), data.message());
+    return extract_typed<DepthImageData>(*data, who_of(instance_id_), port, "DepthImage",
+        [](const Data& d) { return d.is_depth_image(); },
+        [](Data& d) -> DepthImageData& { return const_cast<DepthImageData&>(d.as_depth_image()); });
+}
+
+Result<double> INode::in_number(const String& port) {
+    auto data = in_data(port);
+    if (!data) return Result<double>::failure(data.code(), data.message());
+    return extract_typed<double>(*data, who_of(instance_id_), port, "Number",
+        [](const Data& d) { return d.is_number(); },
+        [](Data& d) { return d.as_number(); });
+}
+
+// 说明：Region / PointCloudData / DepthImageData 只有 const 版 as_xxx()，
+// 上面用 const_cast 把引用取出来，纯粹是为了让 extract_typed 能 move 进 Result。
+// 安全前提有两条，缺一不可：
+//   1. extract_typed **先做类型检查、通过了才调 get()**，所以永远不会碰到
+//      那些 as_xxx() 在类型不符时返回的 static 空对象（否则会把它 move 空）；
+//   2. 那个 Data 是 in_data() 刚返回的**局部副本**，改它不动上游任何数据。
+
+Result<Data> INode::read_param(const String& key, DataType expected) {
+    const String who = who_of(instance_id_);
+    const ParamDef* def = find_param_def(info_, key);
+
+    if (!def && !params_.has(key)) {
+        // 参数名拼错时，老 API 会静默返回 Data{}，等于拿 0 去算 —— 这是最难查的一类
+        return Result<Data>::failure(
+            ErrorCode::NotFound,
+            who + ": no parameter named '" + key + "'. Declared params: " +
+            join_param_ids(info_.params));
+    }
+
+    // def 存在时 params_ 在构造函数里就被默认值填过了，所以这里拿到的
+    // 要么是外面设的值，要么是声明的默认值。
+    const Data raw = params_.has(key) ? params_.get(key) : def->default_value;
+
+    if (raw.is_none()) {
+        return Result<Data>::failure(
+            ErrorCode::InvalidParameter,
+            who + ": parameter '" + key + "' is not set and has no default value");
+    }
+    if (expected != DataType::Any) {
+        if (def && def->type != DataType::Any && def->type != expected) {
+            return Result<Data>::failure(
+                ErrorCode::InvalidParameter,
+                who + ": parameter '" + key + "' is declared as " + data_type_name(def->type) +
+                " but read as " + data_type_name(expected));
+        }
+        if (raw.type() != expected) {
+            return Result<Data>::failure(
+                ErrorCode::InvalidParameter,
+                who + ": parameter '" + key + "' expects " + data_type_name(expected) +
+                ", got " + data_type_name(raw.type()));
+        }
+    }
+    return Result<Data>::success(raw);
+}
+
+Result<double> INode::p_num(const String& key) {
+    const String who = who_of(instance_id_);
+    auto raw = read_param(key, DataType::Number);
+    if (!raw) return Result<double>::failure(raw.code(), raw.message());
+
+    const double v = raw->as_number();
+    if (std::isnan(v)) {
+        return Result<double>::failure(
+            ErrorCode::InvalidParameter, who + ": parameter '" + key + "' is NaN");
+    }
+
+    const ParamDef* def = find_param_def(info_, key);
+    const bool has_lo = def && def->min_value.is_number();
+    const bool has_hi = def && def->max_value.is_number();
+    const double lo = has_lo ? def->min_value.as_number() : 0.0;
+    const double hi = has_hi ? def->max_value.as_number() : 0.0;
+
+    const double c = clamp_value(v, has_lo, lo, has_hi, hi);
+    if (c != v) {
+        warn_once("param:" + key,
+            "parameter '" + key + "' = " + num_str(v) + " is outside the declared range [" +
+            (has_lo ? num_str(lo) : String("-inf")) + ", " +
+            (has_hi ? num_str(hi) : String("+inf")) + "]; clamped to " + num_str(c));
+    }
+    return Result<double>::success(c);
+}
+
+Result<int32_t> INode::p_int(const String& key) {
+    const String who = who_of(instance_id_);
+    auto raw = read_param(key, DataType::Number);
+    if (!raw) return Result<int32_t>::failure(raw.code(), raw.message());
+
+    const double v = raw->as_number();
+    if (std::isnan(v)) {
+        return Result<int32_t>::failure(
+            ErrorCode::InvalidParameter, who + ": parameter '" + key + "' is NaN");
+    }
+
+    const ParamDef* def = find_param_def(info_, key);
+    const bool has_lo = def && def->min_value.is_number();
+    const bool has_hi = def && def->max_value.is_number();
+    const double lo = has_lo ? def->min_value.as_number() : 0.0;
+    const double hi = has_hi ? def->max_value.as_number() : 0.0;
+
+    // 先按范围夹、再取整。反过来的话 2.7 会先被截成 2 再判范围，边界上差一格。
+    const double c = clamp_value(v, has_lo, lo, has_hi, hi);
+    if (c != v) {
+        warn_once("param:" + key,
+            "parameter '" + key + "' = " + num_str(v) + " is outside the declared range [" +
+            (has_lo ? num_str(lo) : String("-inf")) + ", " +
+            (has_hi ? num_str(hi) : String("+inf")) + "]; clamped to " + num_str(c));
+    }
+    return Result<int32_t>::success(static_cast<int32_t>(c));
+}
+
+Result<bool> INode::p_bool(const String& key) {
+    auto raw = read_param(key, DataType::Boolean);
+    if (!raw) return Result<bool>::failure(raw.code(), raw.message());
+    return Result<bool>::success(raw->as_bool());
+}
+
+Result<String> INode::p_str(const String& key) {
+    const String who = who_of(instance_id_);
+    auto raw = read_param(key, DataType::String);
+    if (!raw) return Result<String>::failure(raw.code(), raw.message());
+
+    const String v = raw->as_string();
+
+    // 声明了 options 就是枚举。取值不在里面**不能**凑合跑 ——
+    // 悄悄退回第一个选项会让流程走进完全不同的分支，比直接失败危险得多。
+    const ParamDef* def = find_param_def(info_, key);
+    if (def && !def->options.empty() &&
+        std::find(def->options.begin(), def->options.end(), v) == def->options.end()) {
+        return Result<String>::failure(
+            ErrorCode::InvalidParameter,
+            who + ": parameter '" + key + "' = '" + v + "' is not one of: " +
+            join_ids(def->options));
+    }
+    return Result<String>::success(v);
+}
+
+Result<double> INode::p_num_in(const String& key, double lo, double hi) {
+    if (!(lo <= hi)) {
+        // 边界写反是**算子代码**的 bug，不是配置问题 —— 直接报出来
+        return Result<double>::failure(
+            ErrorCode::InvalidParameter,
+            who_of(instance_id_) + ": p_num_in('" + key + "') called with an inverted range [" +
+            num_str(lo) + ", " + num_str(hi) + "]");
+    }
+    auto raw = read_param(key, DataType::Number);
+    if (!raw) return Result<double>::failure(raw.code(), raw.message());
+
+    const double v = raw->as_number();
+    const double c = clamp_value(v, true, lo, true, hi);
+    if (c != v) {
+        warn_once("param:" + key,
+            "parameter '" + key + "' = " + num_str(v) + " is outside the allowed range [" +
+            num_str(lo) + ", " + num_str(hi) + "]; clamped to " + num_str(c));
+    }
+    return Result<double>::success(c);
+}
+
+Result<int32_t> INode::p_int_in(const String& key, int32_t lo, int32_t hi) {
+    if (!(lo <= hi)) {
+        return Result<int32_t>::failure(
+            ErrorCode::InvalidParameter,
+            who_of(instance_id_) + ": p_int_in('" + key + "') called with an inverted range [" +
+            std::to_string(lo) + ", " + std::to_string(hi) + "]");
+    }
+    auto raw = read_param(key, DataType::Number);
+    if (!raw) return Result<int32_t>::failure(raw.code(), raw.message());
+
+    const double v = raw->as_number();
+    const double c = clamp_value(v, true, static_cast<double>(lo), true, static_cast<double>(hi));
+    if (c != v) {
+        warn_once("param:" + key,
+            "parameter '" + key + "' = " + num_str(v) + " is outside the allowed range [" +
+            std::to_string(lo) + ", " + std::to_string(hi) + "]; clamped to " + num_str(c));
+    }
+    return Result<int32_t>::success(static_cast<int32_t>(c));
+}
+
+bool INode::step_ok(FlowContext& context, uint64_t iteration, uint64_t max_iterations) {
+    if (context.is_stopped()) {
+        // 停止请求是正常操作，不是异常 —— 不打警告，免得刷屏
+        return false;
+    }
+    if (max_iterations > 0 && iteration >= max_iterations) {
+        warn_once("loop-budget:" + std::to_string(max_iterations),
+            "loop hit its budget of " + std::to_string(max_iterations) +
+            " iteration(s) and bailed out early; the result may be incomplete");
+        return false;
+    }
+    return true;
+}
+
+void INode::warn_once(const String& key, const String& message) {
+    if (!warned_params_.insert(key).second) {
+        return;   // 这个 key 已经警告过一次了
+    }
+    OVF_WARN() << "[node " << instance_id_ << " (" << info_.id << ")] " << message;
 }
 
 } // namespace ovf

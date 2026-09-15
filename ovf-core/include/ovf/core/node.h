@@ -11,6 +11,7 @@
 #include "logger.h"
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <atomic>
 #include <mutex>
 #include <functional>
@@ -98,6 +99,63 @@ protected:
     // 记录执行时间
     void record_execute_time(uint64_t microseconds);
 
+    // ========================================================================
+    // 写算子的安全带
+    //
+    // 这一组**全是纯增量**：501 个老算子继续用 get_input/get_param，一行不改。
+    // 新算子用这些，能把"缺输入 / 类型错 / 参数越界 / 死循环"挡在入口。
+    //
+    // 共同约定：失败消息里**一定带节点实例名**（`Node 'xxx': ...`）。
+    // 画布上同类节点有二十个的时候，"输入类型不对"这句话等于没说。
+    // ========================================================================
+
+    // ---- 输入：替掉 get_input 的「静默返回空 Data」----
+    // 失败原因分三种，因为修法完全不同：端口名拼错 / 没连线 / 连了但上游没产出。
+    // 注意：返回的是**副本**，与 get_input() 同量级（它也是按值返回）。
+    Result<Data>           in_data(const String& port);
+    Result<ImageData>      in_image(const String& port);
+    Result<Region>         in_region(const String& port);
+    Result<PointCloudData> in_pointcloud(const String& port);
+    Result<DepthImageData> in_depth_image(const String& port);
+    Result<double>         in_number(const String& port);
+
+    // ---- 参数：声明了范围就自动 clamp + WARN ----
+    // p_num/p_int/... 会核对 ParamDef：参数没声明、类型不符 → 直接失败（挡住拼写错误），
+    // 值超出 min_value/max_value → clamp 到边界并警告一次。
+    Result<Data>    read_param(const String& key, DataType expected);
+    Result<double>  p_num(const String& key);
+    Result<int32_t> p_int(const String& key);
+    Result<bool>    p_bool(const String& key);
+    Result<String>  p_str(const String& key);
+    // 参数没声明范围时，就地约束（lo > hi 视为调用方写错，直接失败）
+    Result<double>  p_num_in(const String& key, double lo, double hi);
+    Result<int32_t> p_int_in(const String& key, int32_t lo, int32_t hi);
+
+    // ---- 循环：一行搞定「被叫停」和「超预算」----
+    /**
+     * @brief 循环体的第一步：该不该继续
+     *
+     * `max_iterations = 0` 表示不限次数，只受"流程被叫停"约束。
+     * 返回 false 有两种原因（停止请求 / 预算耗尽），前者不报警、后者打一次 WARN。
+     * **调用方拿到 false 必须真的 break 出去** —— 这只是一个判据，不是刹车。
+     *
+     * 这是"501 个算子 0 个轮询 is_stopped()"的正解：不改老算子，
+     * 而是让新算子写对这件事的成本降到一行。
+     */
+    bool step_ok(FlowContext& context, uint64_t iteration, uint64_t max_iterations = 0);
+
+    // ---- 失败 / 警告 ----
+    /// 带节点名的失败，并把消息记进 error_message()（引擎失败路径会读它）
+    template<typename T = void>
+    Result<T> fail_node(ErrorCode code, const String& message) {
+        const String full = "Node '" + instance_id_ + "': " + message;
+        set_error(full);
+        return Result<T>::failure(code, full);
+    }
+
+    /// 限流警告：同一个 key 只打一次。key 是警告标识（参数名 / "loop-budget"），不是字面参数名
+    void warn_once(const String& key, const String& message);
+
 protected:
     String instance_id_;
     NodeInfo info_;
@@ -116,6 +174,13 @@ protected:
     String error_message_;
     bool enabled_ = true;
     uint64_t last_execute_time_ = 0;
+
+    // 限流警告用过的 key（warn_once）。同一个参数越界一万次也只提醒一次。
+    //
+    // ⚠️ 这是 INode **唯一一处布局变化**。没有插件 ABI 边界在使用 INode
+    // （全部由库内 make_shared 分配），所以安全；但改动它的那一刻起，
+    // ovf-core 与 ovf-algorithm 就必须一起重编 —— 别只重编一边。
+    mutable std::unordered_set<String> warned_params_;
 };
 
 // 导出宏：确保DLL/EXE边界只有一个实例，静态局部变量会导致各自独立实例、节点注册丢失。
@@ -372,5 +437,44 @@ private:
 #define OVF_REGISTER_NODE_STRICT(NodeClass, type_id, info) \
     OVF_REGISTER_NODE_IMPL(NodeClass, type_id, info, \
         ovf::RegistrationPolicy::FirstWins, true)
+
+// ============================================================================
+// 错误传播宏 —— 把三行压成一行
+// ============================================================================
+
+/**
+ * @brief 取一个返回值 + 失败就把错误原样抛给调用方；成功则绑一个引用
+ *
+ * ```cpp
+ * Result<void> MyNode::execute(FlowContext& ctx) override {
+ *     OVF_TRY_IN(image, in_image("image"));   // 失败直接 return，消息里带节点名
+ *     const ImageData& src = image;
+ *     ...
+ * }
+ * ```
+ *
+ * 展开成：取值 → 判失败 → `return r.error_result();`（自动适配本函数的返回类型）
+ * → 成功时 `auto& var = *r;`。多出来的那个分号是空语句，无害。
+ *
+ * 注意 `var` 是 `auto&`，绑的是 Result 内部的副本 —— 可以安全地改它，
+ * 不会碰到上游节点的数据。
+ */
+#define OVF_TRY_IN(var, expr)                       \
+    auto ovf_try_##var = (expr);                    \
+    if (!ovf_try_##var) {                           \
+        return ovf_try_##var.error_result();        \
+    }                                               \
+    auto& var = *ovf_try_##var
+
+/**
+ * @brief 只要传播、不需要返回值时用（如 `OVF_TRY(validate_inputs());`）
+ */
+#define OVF_TRY(expr)                               \
+    do {                                            \
+        auto ovf_try_result = (expr);               \
+        if (!ovf_try_result) {                      \
+            return ovf_try_result.error_result();   \
+        }                                           \
+    } while (0)
 
 } // namespace ovf
