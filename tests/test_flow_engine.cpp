@@ -1155,6 +1155,53 @@ TEST(FlowEngine, Stage2_RunDoesNotSelfDeadlock) {
     ASSERT_GT(0, callback_hits);   // ASSERT_GT(expected, actual) → actual > expected
 }
 
+// 2.3 「真失败 + 停止请求在飞」时，failed_node_id 必须留住。
+// api_handlers 正是靠 `stopped && failed_node_id.empty()` 区分
+// "纯取消"（按取消报）和"真失败顺带被叫停"（按失败报，保留 error_message）。
+// 没有这个不变量，2.3 的修复就退化成"纯取消被误报成失败"。
+TEST(FlowEngine, Stage2_NodeFailureWithStopInFlight_KeepsFailedNodeId) {
+    FlowEngine::Ptr engine = std::make_shared<FlowEngine>();
+    FlowContext context;
+
+    FlowDef flow;
+    flow.id = "test_stage2_stopfail";
+    FlowDef::NodeInstance throw_inst;
+    throw_inst.id = "thrower";
+    throw_inst.type_id = "test.throws";
+    flow.nodes.push_back(throw_inst);
+    ASSERT_TRUE(engine->load_flow(flow).is_success());
+
+    // 在回调里叫停：让停止请求在节点**执行期间**到达。
+    // 若在循环开头的检查点就叫停，会走纯取消分支、节点根本不跑。
+    engine->set_node_state_callback([&](const String&, NodeState state) {
+        if (state == NodeState::Running) context.stop();
+    });
+
+    FlowResult result = engine->run(context);
+
+    ASSERT_FALSE(result.success);
+    ASSERT_TRUE(result.stopped);                  // 停止标记确实被置上了
+    ASSERT_EQ("thrower", result.failed_node_id);  // ★ 但出错节点没被丢掉
+    ASSERT_FALSE(result.error_message.empty());
+
+    // 对照组：纯取消（节点还没轮到跑就被叫停）→ failed_node_id 必须为空
+    FlowEngine::Ptr engine2 = std::make_shared<FlowEngine>();
+    FlowContext context2;
+    FlowDef flow2;
+    flow2.id = "test_stage2_purestop";
+    FlowDef::NodeInstance c;
+    c.id = "const";
+    c.type_id = "test.constant";
+    flow2.nodes.push_back(c);
+    ASSERT_TRUE(engine2->load_flow(flow2).is_success());
+
+    context2.stop();
+    FlowResult r2 = engine2->run(context2);
+    ASSERT_FALSE(r2.success);
+    ASSERT_TRUE(r2.stopped);
+    ASSERT_TRUE(r2.failed_node_id.empty());   // ← api_handlers 的判据
+}
+
 // ============================================================================
 // 主程序入口
 // ============================================================================

@@ -161,45 +161,78 @@ git diff baseline-501 --stat -- ovf-algorithm     → 空
 
 ---
 
-## 四、拍板项：`stopped` 掩盖真失败（**本阶段未做**）
+## 四、2.3 `stopped` 掩盖真失败 —— 已按拍板项走完
 
-计划书里这条标了「三项会改变现有输出的修复 —— 不许自行决定」，
-所以**代码停在修复前**，等拍板。
+计划书把这条标了「三项会改变现有输出的修复 —— 不许自行决定」，所以实施到这一步
+**先停下来问过用户**，用户选了 **A（只改 API 判定顺序）**。
 
-**现状**（`flow.cpp` 失败分支 + `api_handlers.cpp:654`）：
+### 问题
 
 ```cpp
-// flow.cpp —— 节点报错的同时又被叫停，算取消不算失败
+// flow.cpp —— 节点报错的同时又被叫停，两个标记一起置上
 if (!result.success) {
-    result.stopped = context.is_stopped();   // ← 这里
+    result.stopped = context.is_stopped();
     return result;
 }
 
-// api_handlers.cpp:654 —— stopped 先判，success 后判
+// api_handlers.cpp:654（修前）—— stopped 先判，success 后判
 if (result.stopped) {
+    response["stopped"] = true;
+    response["message"] = "Flow execution stopped by request";
+} else if (!result.success) {
+    response["error"] = result.error_message;        // ← 被跳过
+    response["failed_node"] = result.failed_node_id; // ← 被跳过
+}
+```
+
+**失效场景**：用户点了「停止」，而这**同一个节点**又真的失败了。此时
+`stopped=true` 和 `success=false` 同时成立，API 层先判 `stopped` → 前端显示"已取消"，
+**真实的 `error_message` 和 `failed_node_id` 被整个丢掉** —— 那个坏掉的算子
+看起来像是被正常取消的，查问题会查错方向。
+
+### 修法：靠 `failed_node_id` 区分两种 `stopped && !success`
+
+走选项 A（只动 API 层），但**加了一个判别**，因为两种情况的 `stopped && !success`
+长得一模一样，直接调换判定顺序会把**纯取消**误报成失败：
+
+| 情况 | `failed_node_id` | 按什么报 |
+|---|---|---|
+| 循环被叫停（纯取消） | **空** —— `run()` 只填 `error_message` | 取消（`stopped: true`，保持原样） |
+| 某个节点真失败 + 停止请求在飞 | **非空** —— `run()` 一定填了 | **失败**（`error` + `failed_node`），另带 `stop_requested: true` |
+
+```cpp
+const bool stopped_by_request = result.stopped && result.failed_node_id.empty();
+
+if (stopped_by_request) {
     response["stopped"] = true;
     response["message"] = "Flow execution stopped by request";
 } else if (!result.success) {
     response["error"] = result.error_message;
     response["failed_node"] = result.failed_node_id;
+    if (result.stopped) response["stop_requested"] = true;
+} else {
+    response["message"] = "Flow executed successfully";
 }
 ```
 
-**失效场景**：用户点了"停止"，而这**同一个节点**又真的失败了（比如它自己检查到
-`is_stopped()` 后返回失败，或者纯粹是它本来就有 bug）。此时 `stopped` 和
-`success=false` 同时成立，API 层先判 `stopped` → 前端显示"已取消"，
-**真实的 `error_message` 和 `failed_node_id` 被丢掉**，那个坏掉的算子看起来像是被正常取消的。
+**不需要改 `FlowResult`** —— 这个判别只用到了引擎本来就填好的字段。
 
-**三个选项**：
+### 前端（`ovf-web-editor/js/editor.js`）
 
-| 选项 | 做法 | 代价 |
-|---|---|---|
-| **A（最小）** | `api_handlers` 改成先判 `!success`，再加一个 `response["stop_requested"]` | 只动 API 层 4 行；真失败显示成失败，"被叫停"作为附加信息保留 |
-| **B（计划书原意）** | `FlowResult` 加三态 `Status {Success, Failed, Stopped}` | 要动 `flow.h` + 所有 `FlowResult` 消费者（api_handlers、python bindings、debugger、editor） |
-| **C（不动）** | 保持现状，只在体检报告里标注 | 零风险，但显示 bug 留着 |
+`result.stopped` 字段在纯取消时仍然照发，所以前端原有的「已停止」分支不受影响。
+改的是失败分支：原先只显示「流程执行失败」一句话，**等于把后端刚保住的
+`error_message` 又吞了一次**。现在把出错节点和错误原文带出来。
 
-**我的建议：A。** 它用四分之一的改动拿到"真失败不再被误显示成取消"这个核心收益，
-而 B 的三态枚举要改的消费者多、收益和 A 基本重合。
+### 验收
+
+| 门 | 结果 |
+|---|---|
+| `test_flow_engine` 新增不变量断言 | ✅ **50/50**（`Stage2_NodeFailureWithStopInFlight_KeepsFailedNodeId`） |
+| Web 端 e2e | ✅ **25/25** |
+| `test_stop.py`（真·运行中叫停） | ✅ 全过，且响应用的是 `stopped: true` + 无 `error` 字段 —— 纯取消没被误报成失败 |
+
+新增的断言之所以必要：**没有它，这个修复就退化成"纯取消被误报成失败"**。
+它同时验证了两侧 —— 真失败时 `failed_node_id` 非空，纯取消时为空。
 
 ---
 

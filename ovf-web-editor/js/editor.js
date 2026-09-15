@@ -1314,14 +1314,21 @@ const OVF_Editor = {
             this.render();
 
             if (result.stopped) {
-                // 被叫停：没跑完也不算失败，说清楚是"停的"
+                // 被叫停：没跑完也不算失败，说清楚是"停的"。
+                // 注意 /api/flows/execute 只在**纯取消**时才带 stopped ——
+                // 某个节点真失败的同时又被叫停，后端带的是 error/failed_node，
+                // 那种情况会落到下面的 else，不会被这里吞掉。
                 this.showMessage('流程已停止（未执行完）');
                 this.updateStatus('已停止', 'idle');
             } else if (result.success) {
                 this.showMessage('流程执行成功');
                 this.updateStatus('完成', 'success');
             } else {
-                this.showError('流程执行失败');
+                // 把后端的 error_message 和出错节点带出来 —— 只说"失败"等于没说
+                const failed = result.failed_node ? `（节点 ${result.failed_node}）` : '';
+                this.showError(result.error
+                    ? `流程执行失败${failed}: ${result.error}`
+                    : `流程执行失败${failed}`);
                 this.updateStatus('错误', 'error');
             }
         } catch (error) {

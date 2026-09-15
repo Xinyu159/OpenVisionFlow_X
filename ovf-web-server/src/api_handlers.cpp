@@ -651,15 +651,30 @@ void ApiHandlers::handle_flows_execute(const HttpRequest& req, HttpResponse& res
     response["nodeStates"] = collect_node_states(engine);
     response["execution_time_ms"] = static_cast<double>(result.total_time_us) / 1000.0;
 
-    if (result.stopped) {
-        // 被 /api/flows/stop 叫停：既不是成功也不是失败，单独报出来，
-        // 免得前端把"跑了一半"显示成"全部通过"。
+    // 判定顺序：**真失败优先于「被叫停」**。
+    //
+    // run() 在"节点报错的同时又有停止请求在飞"时会把两个标记一起置上
+    // （success=false + stopped=true），而原先这里先判 stopped —— 于是前端
+    // 显示"已取消"，真实的 error_message 和 failed_node_id 被整个丢掉，
+    // 那个坏掉的算子看起来像是被正常取消的，查问题会查错方向。
+    //
+    // 两种 "stopped && !success" 靠 failed_node_id 区分（不需要改 FlowResult）：
+    //   · 循环被叫停  → run() 只填 error_message，failed_node_id 为空
+    //   · 某个节点真失败 → run() 一定填了 failed_node_id
+    // 前者仍然按"取消"报，免得把"跑了一半"显示成"全部通过"。
+    const bool stopped_by_request = result.stopped && result.failed_node_id.empty();
+
+    if (stopped_by_request) {
         response["stopped"] = true;
         response["message"] = "Flow execution stopped by request";
     } else if (!result.success) {
         status.last_error = result.error_message;
         response["error"] = result.error_message;
         response["failed_node"] = result.failed_node_id;
+        // 失败的同时恰好有停止请求在飞：带一句，但失败信息仍是主信息
+        if (result.stopped) {
+            response["stop_requested"] = true;
+        }
     } else {
         response["message"] = "Flow executed successfully";
     }
