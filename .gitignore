@@ -73,3 +73,9 @@ ENV/
 *.temp
 tmp/
 temp/
+# e2e 回归脚本（/tmp/e2e_verify.py）写在 examples/flows/ 里的临时产物。
+# 每跑一次回归就会重新生成，不属于源码：
+#   e2e_flow.json  —— 中文/emoji 往返用例
+#   pwned.json     —— 路径穿越用例（脚本会断言它没写到 /tmp/pwned.json）
+examples/flows/e2e_flow.json
+examples/flows/pwned.json
