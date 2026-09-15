@@ -16,6 +16,7 @@
 #include "ovf/core/data.h"
 #include "ovf/core/error.h"
 #include "ovf/core/logger.h"
+#include <stdexcept>
 
 using namespace ovf;
 using namespace ovf_test;
@@ -149,6 +150,34 @@ public:
     }
 };
 
+/**
+ * @brief 会抛异常的测试节点 —— 验证引擎的四层兜底（阶段 2.1）
+ *
+ * 写算子是手写指针、手写循环的重活，抛异常是常态。修之前引擎整条执行路径
+ * 一个 try/catch 都没有，这个节点一跑就是 std::terminate，整个进程当场没。
+ */
+class ThrowingNode : public INode {
+public:
+    ThrowingNode(const String& instance_id)
+        : INode(instance_id, make_info()) {}
+
+    Result<void> execute(FlowContext& context) override {
+        (void)context;
+        throw std::runtime_error("simulated operator bug");
+    }
+
+    static NodeInfo make_info() {
+        NodeInfo info;
+        info.id = "test.throws";
+        info.name = "Throwing Node";
+        info.category = "Test";
+        info.description = "Always throws; used by the crash-guard tests";
+        info.inputs = {DataPort("input", "Input Number", DataType::Number, false)};
+        info.outputs = {DataPort("output", "Never Produced", DataType::Number, false)};
+        return info;
+    }
+};
+
 // 注册测试节点
 namespace {
     struct TestNodeRegistrar {
@@ -165,6 +194,9 @@ namespace {
             NodeFactory::instance().register_node("test.compare",
                 [](const String& id) -> INode::Ptr { return std::make_shared<CompareNode>(id); },
                 CompareNode::make_info());
+            NodeFactory::instance().register_node("test.throws",
+                [](const String& id) -> INode::Ptr { return std::make_shared<ThrowingNode>(id); },
+                ThrowingNode::make_info());
         }
     } registrar_test_nodes;
 }
@@ -936,6 +968,238 @@ TEST(FlowEngine, FlowEngine_ComplexPipeline) {
     // 验证结果: 100 + 1 = 101, 101 * 2 = 202, 202 + 1 = 203
     INode::Ptr final_node = engine->get_node("add2");
     ASSERT_EQ(203.0, final_node->get_output("output").as_number());
+}
+
+// ============================================================================
+// 阶段 2 —— 引擎防崩（四层 try/catch + 拓扑排序修复）
+// ============================================================================
+
+// 门 (a) 2.2 拓扑排序重复边：同一个上游喂同一个节点的两个输入端。
+// 建表时每条输入连接都会 push 一条边，所以这里会产生 ["const","const"]。
+// 修之前：入度按 size() 算成 2，而递减用 std::find 最多命中一次、只减 1
+// → 入度永远减不到 0 → 一个完全合法的 DAG 被判成 "cyclic dependencies"，
+// load_flow 直接失败。
+TEST(FlowEngine, Stage2_DuplicateEdges_LoadAndRun) {
+    FlowEngine::Ptr engine = std::make_shared<FlowEngine>();
+    FlowContext context;
+
+    FlowDef flow;
+    flow.id = "test_stage2_dup";
+
+    FlowDef::NodeInstance const_inst;
+    const_inst.id = "const";
+    const_inst.type_id = "test.constant";
+    const_inst.params.set("value", Data(20.0));
+
+    FlowDef::NodeInstance comp_inst;
+    comp_inst.id = "compare";
+    comp_inst.type_id = "test.compare";
+    // ★ 两个输入端接的是同一个上游 —— 重复边的来源
+    FlowDef::NodeInstance::InputConnection conn;
+    conn.source_node_id = "const";
+    conn.source_port = "output";
+    comp_inst.input_connections["input1"] = conn;
+    comp_inst.input_connections["input2"] = conn;
+
+    flow.nodes.push_back(const_inst);
+    flow.nodes.push_back(comp_inst);
+
+    Result<void> loaded = engine->load_flow(flow);
+    // ← 修之前这里就是 CyclicDependency
+    ASSERT_TRUE(loaded.is_success());
+
+    FlowResult result = engine->run(context);
+    ASSERT_TRUE(result.success);
+    // 20 > 20 = false
+    ASSERT_FALSE(engine->get_node("compare")->get_output("result").as_bool());
+}
+
+// 门 (b) 2.1 第 1 层 catch：算子抛异常 → 带 failed_node_id 的干净 fail，不崩
+TEST(FlowEngine, Stage2_OperatorThrows_FailsCleanly) {
+    FlowEngine::Ptr engine = std::make_shared<FlowEngine>();
+    FlowContext context;
+
+    FlowDef flow;
+    flow.id = "test_stage2_throw";
+
+    FlowDef::NodeInstance const_inst;
+    const_inst.id = "const";
+    const_inst.type_id = "test.constant";
+    const_inst.params.set("value", Data(7.0));
+
+    FlowDef::NodeInstance throw_inst;
+    throw_inst.id = "thrower";
+    throw_inst.type_id = "test.throws";
+    FlowDef::NodeInstance::InputConnection conn;
+    conn.source_node_id = "const";
+    conn.source_port = "output";
+    throw_inst.input_connections["input"] = conn;
+
+    flow.nodes.push_back(const_inst);
+    flow.nodes.push_back(throw_inst);
+
+    ASSERT_TRUE(engine->load_flow(flow).is_success());
+
+    // 关键：这一步在修之前是 std::terminate，整个测试进程直接没
+    FlowResult result;
+    ASSERT_NO_THROW(result = engine->run(context));
+
+    ASSERT_FALSE(result.success);
+    ASSERT_EQ("thrower", result.failed_node_id);
+    ASSERT_TRUE(result.error_message.find("simulated operator bug") != String::npos);
+    // 错误也要落在节点上，编辑器才能把那个框标红
+    ASSERT_FALSE(engine->get_node("thrower")->error_message().empty());
+}
+
+// 门 (c) 2.4 node_times 全程累积（修之前成功路径整个丢掉、失败路径只剩那一个节点）
+TEST(FlowEngine, Stage2_NodeTimes_Accumulated) {
+    FlowEngine::Ptr engine = std::make_shared<FlowEngine>();
+    FlowContext context;
+
+    FlowDef flow;
+    flow.id = "test_stage2_times";
+
+    // 5 个节点串成一条链：n1 -> n2 -> n3 -> n4 -> n5
+    FlowDef::NodeInstance first;
+    first.id = "n1";
+    first.type_id = "test.constant";
+    first.params.set("value", Data(1.0));
+    flow.nodes.push_back(first);
+
+    String prev = "n1";
+    for (int i = 2; i <= 5; ++i) {
+        FlowDef::NodeInstance inst;
+        inst.id = "n" + std::to_string(i);
+        inst.type_id = "test.add_one";
+        FlowDef::NodeInstance::InputConnection conn;
+        conn.source_node_id = prev;
+        conn.source_port = "output";
+        inst.input_connections["input"] = conn;
+        flow.nodes.push_back(inst);
+        prev = inst.id;
+    }
+
+    ASSERT_TRUE(engine->load_flow(flow).is_success());
+    FlowResult result = engine->run(context);
+
+    ASSERT_TRUE(result.success);
+    // ← 修之前成功路径的 node_times 是空的（size() == 0）
+    ASSERT_EQ(5u, result.node_times.size());
+    ASSERT_EQ(5.0, engine->get_node("n5")->get_output("output").as_number());
+}
+
+// 门 (d) 2.6 Parallel / DataDriven 明确失败。
+// 修之前这两个函数都是 `return run(context);`，而 run() 又按 execution_mode_
+// 派发回它们 → 互相递归 → 栈溢出，进程直接没。
+TEST(FlowEngine, Stage2_UnsupportedModes_FailNotCrash) {
+    FlowEngine::Ptr engine = std::make_shared<FlowEngine>();
+    FlowContext context;
+
+    FlowDef flow;
+    flow.id = "test_stage2_modes";
+    FlowDef::NodeInstance inst;
+    inst.id = "solo";
+    inst.type_id = "test.constant";
+    inst.params.set("value", Data(1.0));
+    flow.nodes.push_back(inst);
+    ASSERT_TRUE(engine->load_flow(flow).is_success());
+
+    FlowResult par;
+    engine->set_execution_mode(FlowEngine::ExecutionMode::Parallel);
+    ASSERT_NO_THROW(par = engine->run(context));   // ← 修之前是栈溢出
+    ASSERT_FALSE(par.success);
+    ASSERT_TRUE(par.error_message.find("Parallel") != String::npos);
+
+    FlowResult dd;
+    engine->set_execution_mode(FlowEngine::ExecutionMode::DataDriven);
+    ASSERT_NO_THROW(dd = engine->run(context));
+    ASSERT_FALSE(dd.success);
+    ASSERT_TRUE(dd.error_message.find("DataDriven") != String::npos);
+
+    // 切回顺序模式后必须照常能跑（不能把引擎留在坏状态里）
+    engine->set_execution_mode(FlowEngine::ExecutionMode::Sequential);
+    FlowResult seq = engine->run(context);
+    ASSERT_TRUE(seq.success);
+}
+
+// 2.5 加锁快照：run() 期间节点的回调重入引擎不应死锁。
+// （compute 快照 + 出锁执行；全程持锁的话这里会直接挂住）
+TEST(FlowEngine, Stage2_RunDoesNotSelfDeadlock) {
+    FlowEngine::Ptr engine = std::make_shared<FlowEngine>();
+    FlowContext context;
+
+    FlowDef flow;
+    flow.id = "test_stage2_deadlock";
+
+    FlowDef::NodeInstance const_inst;
+    const_inst.id = "const";
+    const_inst.type_id = "test.constant";
+    const_inst.params.set("value", Data(3.0));
+    flow.nodes.push_back(const_inst);
+
+    ASSERT_TRUE(engine->load_flow(flow).is_success());
+
+    // 回调里重入引擎 —— 这正是"不能全程持锁"的原因
+    int callback_hits = 0;
+    engine->set_node_state_callback([&](const String& id, NodeState state) {
+        (void)state;
+        callback_hits++;
+        // 重入：这几个都上锁，run() 要是还持着 mutex_ 就自死锁了
+        engine->get_node(id);
+        engine->get_execution_order();
+        engine->get_all_nodes();
+    });
+
+    FlowResult result = engine->run(context);
+    ASSERT_TRUE(result.success);
+    ASSERT_GT(0, callback_hits);   // ASSERT_GT(expected, actual) → actual > expected
+}
+
+// 2.3 「真失败 + 停止请求在飞」时，failed_node_id 必须留住。
+// api_handlers 正是靠 `stopped && failed_node_id.empty()` 区分
+// "纯取消"（按取消报）和"真失败顺带被叫停"（按失败报，保留 error_message）。
+// 没有这个不变量，2.3 的修复就退化成"纯取消被误报成失败"。
+TEST(FlowEngine, Stage2_NodeFailureWithStopInFlight_KeepsFailedNodeId) {
+    FlowEngine::Ptr engine = std::make_shared<FlowEngine>();
+    FlowContext context;
+
+    FlowDef flow;
+    flow.id = "test_stage2_stopfail";
+    FlowDef::NodeInstance throw_inst;
+    throw_inst.id = "thrower";
+    throw_inst.type_id = "test.throws";
+    flow.nodes.push_back(throw_inst);
+    ASSERT_TRUE(engine->load_flow(flow).is_success());
+
+    // 在回调里叫停：让停止请求在节点**执行期间**到达。
+    // 若在循环开头的检查点就叫停，会走纯取消分支、节点根本不跑。
+    engine->set_node_state_callback([&](const String&, NodeState state) {
+        if (state == NodeState::Running) context.stop();
+    });
+
+    FlowResult result = engine->run(context);
+
+    ASSERT_FALSE(result.success);
+    ASSERT_TRUE(result.stopped);                  // 停止标记确实被置上了
+    ASSERT_EQ("thrower", result.failed_node_id);  // ★ 但出错节点没被丢掉
+    ASSERT_FALSE(result.error_message.empty());
+
+    // 对照组：纯取消（节点还没轮到跑就被叫停）→ failed_node_id 必须为空
+    FlowEngine::Ptr engine2 = std::make_shared<FlowEngine>();
+    FlowContext context2;
+    FlowDef flow2;
+    flow2.id = "test_stage2_purestop";
+    FlowDef::NodeInstance c;
+    c.id = "const";
+    c.type_id = "test.constant";
+    flow2.nodes.push_back(c);
+    ASSERT_TRUE(engine2->load_flow(flow2).is_success());
+
+    context2.stop();
+    FlowResult r2 = engine2->run(context2);
+    ASSERT_FALSE(r2.success);
+    ASSERT_TRUE(r2.stopped);
+    ASSERT_TRUE(r2.failed_node_id.empty());   // ← api_handlers 的判据
 }
 
 // ============================================================================

@@ -160,6 +160,30 @@ enum class DataType : uint8_t {
     Any = 255
 };
 
+/**
+ * @brief DataType 的可读名，用于错误/警告消息
+ *
+ * 报"期望 Image，实际是 Number"比报"期望 1，实际是 2"有用得多。
+ */
+inline const char* data_type_name(DataType type) {
+    switch (type) {
+        case DataType::None:       return "None";
+        case DataType::Image:      return "Image";
+        case DataType::Number:     return "Number";
+        case DataType::String:     return "String";
+        case DataType::Boolean:    return "Boolean";
+        case DataType::Array:      return "Array";
+        case DataType::Object:     return "Object";
+        case DataType::Point:      return "Point";
+        case DataType::Region:     return "Region";
+        case DataType::Pose:       return "Pose";
+        case DataType::PointCloud: return "PointCloud";
+        case DataType::DepthImage: return "DepthImage";
+        case DataType::Any:        return "Any";
+    }
+    return "Unknown";
+}
+
 // 图像数据
 struct ImageData {
     uint32_t width = 0;

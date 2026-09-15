@@ -6,7 +6,9 @@
 #include "ovf/core/flow.h"
 #include <chrono>
 #include <algorithm>
+#include <exception>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 // nlohmann_json 头文件 (内置简化版本)
@@ -100,9 +102,16 @@ Result<void> FlowEngine::load_flow(const FlowDef& flow_def) {
             }
             
             source_node->connect_output(conn.source_port, node, input_port);
-            
-            // 构建邻接表（依赖关系）
-            adjacency_list_[node_inst.id].push_back(conn.source_node_id);
+
+            // 构建邻接表（依赖关系）。
+            // 必须去重：一个节点的**每个输入端**都会走到这里，所以 image 和 mask
+            // 都接同一个上游时，这里会push 两条相同的边 → 拓扑排序按 size() 算
+            // 入度会得 2，而递减时最多只减 1 → 入度永远减不到 0 →
+            // 一个完全合法的 DAG 被判成 "Flow has cyclic dependencies"。
+            auto& deps = adjacency_list_[node_inst.id];
+            if (std::find(deps.begin(), deps.end(), conn.source_node_id) == deps.end()) {
+                deps.push_back(conn.source_node_id);
+            }
         }
     }
     
@@ -379,72 +388,128 @@ Vector<INode::Ptr> FlowEngine::get_all_nodes() const {
 }
 
 FlowResult FlowEngine::run(FlowContext& context) {
-    auto start_time = std::chrono::high_resolution_clock::now();
-    
-    bool stopped_by_request = false;
+    // 第 2 层 try/catch：编排本身（快照、派发、暂停等待、状态回调）抛出的异常
+    // 也要兜住，不能让它顺着 FlowRunner::run_thread 冒到线程入口去。
+    try {
+        auto start_time = std::chrono::high_resolution_clock::now();
 
-    switch (execution_mode_) {
-        case ExecutionMode::Sequential:
-            for (const auto& node_id : execution_order_) {
-                // 每轮开头先查停：停止也可能发生在上一轮的暂停等待里，
-                // 检查放这里才能保证"叫停之后不会再多跑一个节点"。
-                if (context.is_stopped()) {
-                    stopped_by_request = true;
-                    break;
-                }
+        // 先在本锁内拷一份快照，**出锁再执行**。
+        // 不能全程持锁：算子的回调和 node_state_callback_ 会重入引擎
+        // （get_node / step_next / set_param 都上锁）→ 持着 mutex_ 跑流程会自死锁。
+        // shared_ptr 保证节点在快照之外仍然活着。
+        ExecutionMode mode;
+        Vector<String> order;
+        HashMap<String, INode::Ptr> nodes;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            mode = execution_mode_;
+            order = execution_order_;
+            nodes = nodes_;
+        }
 
-                auto node = nodes_[node_id];
-                if (!node || !node->is_enabled()) continue;
+        if (mode == ExecutionMode::Parallel) {
+            return execute_parallel(context);
+        }
+        if (mode == ExecutionMode::DataDriven) {
+            return execute_data_driven(context);
+        }
 
-                auto result = execute_node(node, context);
-                if (!result.success) {
-                    // 节点报错的同时又被叫停 —— 算取消，不算失败
-                    result.stopped = context.is_stopped();
-                    return result;
-                }
+        bool stopped_by_request = false;
+        HashMap<String, uint64_t> node_times;
 
-                // 等待暂停恢复
-                while (context.is_paused() && !context.is_stopped()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                }
-            }
-            // 循环自然走完（在最后一个节点之后才叫停）也要认出来
+        for (const auto& node_id : order) {
+            // 每轮开头先查停：停止也可能发生在上一轮的暂停等待里，
+            // 检查放这里才能保证"叫停之后不会再多跑一个节点"。
             if (context.is_stopped()) {
                 stopped_by_request = true;
+                break;
             }
-            break;
 
-        case ExecutionMode::Parallel:
-            return execute_parallel(context);
+            // find 而不是 operator[]：后者查不到会**插入一个空条目**污染 nodes_，
+            // 而 nodes_ 正是拓扑排序算入度的依据。
+            auto it = nodes.find(node_id);
+            if (it == nodes.end() || !it->second) {
+                // 执行顺序是从 nodes_ 推出来的，这里查不到说明两者对不上。
+                // 报出来，比静默少跑一个节点强。
+                FlowResult broken = FlowResult::fail("Node not found: " + node_id, node_id);
+                broken.node_times = node_times;
+                return broken;
+            }
+            auto node = it->second;
+            if (!node->is_enabled()) continue;
 
-        case ExecutionMode::DataDriven:
-            return execute_data_driven(context);
+            FlowResult result;
+            try {
+                result = execute_node(node, context);
+            } catch (const std::exception& e) {
+                result = FlowResult::fail(
+                    String("Node '") + node_id + "' threw an exception: " + e.what(), node_id);
+                node->set_error(result.error_message);
+            } catch (...) {
+                result = FlowResult::fail(
+                    "Node '" + node_id + "' threw an unknown exception", node_id);
+                node->set_error(result.error_message);
+            }
+
+            // 把这一轮的耗时并进总表（成功路径原先整个丢掉）。
+            for (const auto& t : result.node_times) {
+                node_times[t.first] = t.second;
+            }
+
+            if (!result.success) {
+                // 节点报错的同时又被叫停 —— 算取消，不算失败
+                result.stopped = context.is_stopped();
+                result.node_times = node_times;
+                return result;
+            }
+
+            // 等待暂停恢复
+            while (context.is_paused() && !context.is_stopped()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+        // 循环自然走完（在最后一个节点之后才叫停）也要认出来
+        if (context.is_stopped()) {
+            stopped_by_request = true;
+        }
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+
+        FlowResult result = FlowResult::ok();
+        result.total_time_us = total_time.count();
+        result.node_times = node_times;
+
+        if (stopped_by_request) {
+            // 中途被叫停 = 没跑完。这里报成功，前端就会把整条流程画成全绿。
+            result.success = false;
+            result.stopped = true;
+            result.error_message = "Flow execution stopped by request";
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return FlowResult::fail(String("Flow execution failed: ") + e.what());
+    } catch (...) {
+        return FlowResult::fail("Flow execution failed: unknown exception");
     }
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-
-    FlowResult result = FlowResult::ok();
-    result.total_time_us = total_time.count();
-
-    if (stopped_by_request) {
-        // 中途被叫停 = 没跑完。这里报成功，前端就会把整条流程画成全绿。
-        result.success = false;
-        result.stopped = true;
-        result.error_message = "Flow execution stopped by request";
-    }
-    return result;
 }
 
 FlowResult FlowEngine::run_node(const String& node_id, FlowContext& context) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    auto node = nodes_.find(node_id);
-    if (node == nodes_.end()) {
-        return FlowResult::fail("Node not found: " + node_id, node_id);
+    INode::Ptr node;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = nodes_.find(node_id);
+        if (it == nodes_.end()) {
+            return FlowResult::fail("Node not found: " + node_id, node_id);
+        }
+        node = it->second;
     }
-    
-    return execute_node(node->second, context);
+    // 出锁再执行：算子的回调会重入引擎，持着 mutex_ 调 execute 会自死锁。
+    // shared_ptr 保证节点在这里仍然活着。
+    if (!node) {
+        return FlowResult::fail("Node is null: " + node_id, node_id);
+    }
+    return execute_node(node, context);
 }
 
 void FlowEngine::step_begin() {
@@ -460,9 +525,15 @@ Result<INode::Ptr> FlowEngine::step_next() {
         return Result<INode::Ptr>::failure(ErrorCode::OutOfRange, "No more steps");
     }
     
-    auto node_id = execution_order_[current_step_++];
-    auto node = nodes_[node_id];
-    return Result<INode::Ptr>::success(node);
+    auto node_id = execution_order_[current_step_];
+    // find 而不是 operator[]：后者查不到会插入空条目污染 nodes_
+    auto it = nodes_.find(node_id);
+    if (it == nodes_.end() || !it->second) {
+        // 失败时**不推进** current_step_，让调用方可以重试同一步
+        return Result<INode::Ptr>::failure(ErrorCode::NodeNotFound, "Node not found: " + node_id);
+    }
+    ++current_step_;
+    return Result<INode::Ptr>::success(it->second);
 }
 
 bool FlowEngine::step_has_more() const {
@@ -503,60 +574,54 @@ Result<Vector<String>> FlowEngine::get_dependents(const String& node_id) const {
 }
 
 Result<Vector<String>> FlowEngine::topological_sort() const {
-    // Kahn算法拓扑排序
+    // Kahn 算法拓扑排序。
+    //
+    // 入度 = 上游节点**个数**，前提是 adjacency_list_ 里没有重复条目。
+    // load_flow 建表时已经去重，这里再用 std::count 计数递减（而不是
+    // std::find 命中一次就减 1）作为第二道保险：只要还剩一条重复边，
+    // 入度就永远减不到 0，一个合法的 DAG 会被误判成有环。
     HashMap<String, int> in_degree;
-    
-    // 初始化入度
+
     for (const auto& pair : nodes_) {
         in_degree[pair.first] = 0;
     }
-    
-    // 计算入度
-    for (const auto& pair : adjacency_list_) {
-        for (const auto& dep : pair.second) {
-            // dep -> pair.first 的边
-            // pair.first 的入度增加
-        }
-    }
-    
-    // 重新计算入度（根据实际连接）
-    for (const auto& pair : adjacency_list_) {
-        for (const auto& dep : pair.second) {
-            // dep 是 pair.first 的依赖（上游节点）
-            // 所以 pair.first 的入度应该是其上游节点数量
-        }
-    }
-    
-    // 实际上 adjacency_list_ 存储的是每个节点的上游节点列表
+
+    // adjacency_list_ 存的是每个节点的上游节点列表
     for (const auto& pair : adjacency_list_) {
         in_degree[pair.first] = static_cast<int>(pair.second.size());
     }
-    
-    // 找到所有入度为0的节点
-    Vector<String> queue;
+
+    // 入度为 0 的先入队。
+    // nodes_/in_degree 是 unordered_map，迭代顺序每次都可能不同 ——
+    // 用有序集合当 frontier，保证同一个流程每次跑出来的节点顺序完全一致
+    // （体检报告要能 diff，编辑器里刷新一次也不该换个顺序）。
+    std::set<String> frontier;
     for (const auto& pair : in_degree) {
         if (pair.second == 0) {
-            queue.push_back(pair.first);
+            frontier.insert(pair.first);
         }
     }
-    
+
     Vector<String> result;
-    while (!queue.empty()) {
-        String node_id = queue.back();
-        queue.pop_back();
+    while (!frontier.empty()) {
+        String node_id = *frontier.begin();   // 字典序最小的先出，顺序确定
+        frontier.erase(frontier.begin());
         result.push_back(node_id);
-        
+
         // 更新下游节点的入度
         for (const auto& pair : adjacency_list_) {
-            if (std::find(pair.second.begin(), pair.second.end(), node_id) != pair.second.end()) {
-                in_degree[pair.first]--;
-                if (in_degree[pair.first] == 0) {
-                    queue.push_back(pair.first);
+            auto hits = std::count(pair.second.begin(), pair.second.end(), node_id);
+            if (hits > 0) {
+                in_degree[pair.first] -= static_cast<int>(hits);
+                // <=0 而不是 ==0：万一还有重复边漏网把入度减成负数，
+                // 也得让这个节点出得来，不能卡死整条流程。
+                if (in_degree[pair.first] <= 0) {
+                    frontier.insert(pair.first);
                 }
             }
         }
     }
-    
+
     // 检查是否有环
     if (result.size() != nodes_.size()) {
         return Result<Vector<String>>::failure(
@@ -564,7 +629,7 @@ Result<Vector<String>> FlowEngine::topological_sort() const {
             "Flow has cyclic dependencies"
         );
     }
-    
+
     return Result<Vector<String>>::success(result);
 }
 
@@ -593,9 +658,25 @@ FlowResult FlowEngine::execute_node(INode::Ptr node, FlowContext& context) {
     }
     context.notify_node_state(node->instance_id(), NodeState::Running);
     
-    // 执行
-    auto exec_result = node->execute(context);
-    
+    // 执行。
+    // 第 1 层 try/catch —— 这是整条执行路径上最关键的一处：写算子是手写指针、
+    // 手写循环的重活，抛异常是常态。原先这里没有任何兜底，算子一抛就顺着
+    // run() → run_thread() 冒到线程入口变成 std::terminate，整个 Web 服务当场没。
+    // 现在兜成一条带 failed_node_id 的体面失败。
+    auto exec_result = [&]() -> Result<void> {
+        try {
+            return node->execute(context);
+        } catch (const std::exception& e) {
+            return Result<void>::failure(
+                ErrorCode::ExecutionFailed,
+                String("Node '") + node->instance_id() + "' threw an exception: " + e.what());
+        } catch (...) {
+            return Result<void>::failure(
+                ErrorCode::ExecutionFailed,
+                "Node '" + node->instance_id() + "' threw a non-standard exception");
+        }
+    }();
+
     auto end_time = std::chrono::high_resolution_clock::now();
     auto exec_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
     node->record_execute_time(exec_time.count());
@@ -621,15 +702,26 @@ FlowResult FlowEngine::execute_node(INode::Ptr node, FlowContext& context) {
 }
 
 FlowResult FlowEngine::execute_parallel(FlowContext& context) {
-    // 并行执行 - 基于层级并行
-    // 暂时简化实现，后续完善
-    return run(context);
+    (void)context;
+    // 原先这里是 `return run(context);` —— 而 run() 又按 execution_mode_ 派发回
+    // 这里，两边互相递归，一调用就是栈溢出（进程直接没，连栈回溯都难拿）。
+    //
+    // 不做"假并行"：真正的并行需要 INode 线程安全，而全代码库有 600+ 处
+    // 写路径、501 个算子一个都没做同步，那是另一个大得多的工程。
+    // 这里明确报"不支持"，比装成能跑然后偶发数据损坏强得多。
+    return FlowResult::fail(
+        "ExecutionMode::Parallel is not supported: INode is not thread-safe. "
+        "Use ExecutionMode::Sequential.");
 }
 
 FlowResult FlowEngine::execute_data_driven(FlowContext& context) {
-    // 数据驱动执行 - 当数据就绪时执行节点
-    // 暂时简化实现，后续完善
-    return run(context);
+    (void)context;
+    // 同上：原先与 run() 互相递归。
+    // 真正的数据驱动调度需要给每个节点维护"输入是否就绪"的状态机，
+    // 而引擎现在只有拓扑序，没有这套状态。明确报不支持。
+    return FlowResult::fail(
+        "ExecutionMode::DataDriven is not supported. "
+        "Use ExecutionMode::Sequential.");
 }
 
 // ============== FlowRunner ==============
@@ -695,9 +787,23 @@ void FlowRunner::run_thread() {
             trigger_ = false;
         }
         
-        // 执行流程
-        result = engine_->run(context_);
-        
+        // 执行流程。
+        // 第 3 层 try/catch —— run_thread 是**线程入口**，这是全代码库最重要的
+        // 一处 catch：异常从线程函数里逃出去就是 std::terminate，整个进程直接没，
+        // 而且连是哪个算子弄死的都看不到。
+        try {
+            auto engine = engine_;   // 快照，避免与 set_engine 竞争
+            if (!engine) {
+                result = FlowResult::fail("FlowRunner: engine not set");
+            } else {
+                result = engine->run(context_);
+            }
+        } catch (const std::exception& e) {
+            result = FlowResult::fail(String("Flow run threw an exception: ") + e.what());
+        } catch (...) {
+            result = FlowResult::fail("Flow run threw a non-standard exception");
+        }
+
         // 更新统计
         total_runs_++;
         if (result.success) {
@@ -706,12 +812,19 @@ void FlowRunner::run_thread() {
             failed_runs_++;
         }
         total_time_us_ += result.total_time_us;
-        
-        // 回调
+
+        // 回调。result_callback_ 是外部代码，同样可能抛 ——
+        // 抛在这也一样能带走整个进程，单独兜一层。
         if (result_callback_) {
-            result_callback_(result);
+            try {
+                result_callback_(result);
+            } catch (const std::exception& e) {
+                OVF_ERROR() << "FlowRunner: result callback threw: " << e.what();
+            } catch (...) {
+                OVF_ERROR() << "FlowRunner: result callback threw a non-standard exception";
+            }
         }
-        
+
         if (run_mode_ == RunMode::Once) {
             running_ = false;
             break;

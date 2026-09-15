@@ -6,6 +6,9 @@
 #include "ovf/web_server.h"
 #include "ovf/core/logger.h"
 #include "ovf/algorithm/algorithm.h"
+#ifdef OVF_WITH_USER_NODES
+#include "ovf/nodes/nodes.h"
+#endif
 #include <iostream>
 #include <string>
 #include <csignal>
@@ -122,6 +125,42 @@ int main(int argc, char* argv[]) {
     // 初始化算法模块
     OVF_INFO() << "Initializing algorithm module...";
     ovf::algorithm::initialize_algorithm_module();
+
+#ifdef OVF_WITH_USER_NODES
+    // 初始化用户算子模块（ovf-nodes/，你自己写的算子）。
+    //
+    // 这里两句是**故意分开写的**，因为它们承的是不同的重（详见表见
+    // docs/hardening/stage4_nodes.md）：
+
+    OVF_INFO() << "Initializing user node module...";
+    try {
+        // ① 第 3 层（探测）：libovf-nodes.so 到底进没进这个进程。
+        //
+        //    这句用的是**弱引用**（见 ovf-nodes/include/ovf/nodes/nodes.h），
+        //    所以它**不参与**"链接器要不要保留这个库"的判定。含义是：
+        //    就算下面那句 ② 被谁删了、库真被 --as-needed 丢掉了，这句
+        //    照样编得过、照样跑得起来，然后把原因和修法原样讲清楚。
+        //    这是唯一能在"库已经不在了"的前提下还能开口的检查。
+        ovf::nodes::require_user_node_module_loaded("ovf-web-server");
+
+        // ② 第 2 层：ODR-use 一个**强**符号，链接器因此必须保留整个
+        //    libovf-nodes.so，算子的静态初始化才有机会跑。
+        //    顺带把第 3 层的另一半做掉：拿模块自己的算子清单比对真实
+        //    注册表，少一个就在**启动时**抛可操作错误，绝不静默放行。
+        ovf::nodes::initialize_user_nodes();
+    } catch (const Exception& e) {
+        // 用户算子出问题是**构建/配置**层面的事，不是运行期偶发 —— 起不来就是
+        // 起不来，带着可操作的说明退出，比"起来了但少一半算子"强得多。
+        std::cerr << "\n[FATAL] " << e.what() << "\n" << std::endl;
+        return 1;
+    }
+#endif
+
+    // 注册表摘要：节点类型数 / type_id 冲突 / 元数据问题数。
+    // 放在这里而不是 initialize_algorithm_module() 里面，是因为后者在
+    // ovf-algorithm/ —— 那个目录要对上游保持零 diff。
+    // 冲突数非 0 意味着有算子被静默丢弃，这一行就是发现它的地方。
+    ovf::NodeFactory::instance().log_summary();
 
     // 创建服务器
     g_server = std::make_shared<WebServer>();

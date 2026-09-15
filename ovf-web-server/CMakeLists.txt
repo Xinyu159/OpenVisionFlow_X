@@ -54,6 +54,17 @@ target_link_libraries(ovf-web-server
         ovf-algorithm
 )
 
+# 用户算子模块（-DBUILD_OVF_NODES=OFF 时整块摘掉）。
+#
+# ★ 链的是 ovf-nodes-link，**不是** ovf-nodes。
+#   后者会被 ld 的 --as-needed 整库丢掉（Ubuntu 默认开），丢掉之后静态初始化
+#   不跑，你写的算子全部变成运行时的 "Node type 'X' not found"，而**链接期
+#   一个警告都没有**。ovf-nodes-link 自带 -Wl,--no-as-needed 把库钉住。
+if(BUILD_OVF_NODES)
+    target_link_libraries(ovf-web-server PRIVATE ovf-nodes-link)
+    target_compile_definitions(ovf-web-server PRIVATE OVF_WITH_USER_NODES=1)
+endif()
+
 # Windows特定设置
 if(WIN32)
     target_compile_definitions(ovf-web-server PRIVATE

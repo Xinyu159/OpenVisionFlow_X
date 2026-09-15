@@ -10,6 +10,7 @@
 #include <sstream>
 #include <vector>
 #include <stdexcept>
+#include <utility>
 
 namespace ovf {
 
@@ -35,22 +36,67 @@ private:
     String message_;
 };
 
+template<typename T = void>
+class Result;
+
+/**
+ * @brief 「失败」的可转换载体 —— 让 `return r.error_result();` 适配任意 Result<U>
+ *
+ * 为什么不直接给 Result<T> 加一个模板成员函数：`Result<ImageData>` 失败之后要
+ * 作为外层函数的 `Result<void>` 返回时，编译器**没法从 return 语句反推**
+ * `error_result<U>()` 里的 U 该取什么 —— 返回语句不参与模板实参推导。
+ * 交给一个带模板化隐式转换的小对象，外层函数返回 `Result<任意类型>` 都成立：
+ *
+ * ```cpp
+ * Result<ImageData> grab(...);
+ * Result<void> process() {
+ *     auto img = grab();
+ *     if (!img) return img.error_result();   // Result<ImageData> 的失败 → Result<void>
+ *     ...
+ * }
+ * ```
+ */
+class ErrorResult {
+public:
+    ErrorResult(ErrorCode code, const String& message)
+        : code_(code), message_(message) {}
+
+    /// 隐式转换到**任意** `Result<U>` 的失败值
+    template<typename U>
+    operator Result<U>() const {
+        return Result<U>::failure(code_, message_);
+    }
+
+    ErrorCode code() const { return code_; }
+    const String& message() const { return message_; }
+
+private:
+    ErrorCode code_;
+    String message_;
+};
+
 /**
  * @brief 结果类 - 用于返回操作结果
  */
-template<typename T = void>
+template<typename T>
 class Result {
 public:
     // 成功构造
     static Result<T> success(const T& value = T{}) {
         return Result<T>(value, ErrorCode::Success, "");
     }
-    
+
+    // 成功构造（右值）—— 把临时量搬进来，别整幅图像再拷一次。
+    // 只对右值生效，既有的 `success(lvalue)` 调用点解析结果不变。
+    static Result<T> success(T&& value) {
+        return Result<T>(std::move(value), ErrorCode::Success, "");
+    }
+
     // 失败构造
     static Result<T> failure(ErrorCode code, const String& message = "") {
         return Result<T>(T{}, code, message);
     }
-    
+
     bool is_success() const { return code_ == ErrorCode::Success; }
     bool is_failure() const { return code_ != ErrorCode::Success; }
     
@@ -78,10 +124,22 @@ public:
     const T* operator->() const { return &value_; }
     T* operator->() { return &value_; }
 
+    /**
+     * @brief 把失败原样转成**外层函数的返回类型**
+     *
+     * 用法： `if (!r) return r.error_result();`
+     * 无论外层返回 `Result<void>` 还是 `Result<ImageData>` 都能直接编译。
+     * 只在失败时用；成功时调它返回的code是 Success，没有意义。
+     */
+    ErrorResult error_result() const { return ErrorResult(code_, message_); }
+
 private:
     Result(const T& value, ErrorCode code, const String& message)
         : value_(value), code_(code), message_(message) {}
-    
+
+    Result(T&& value, ErrorCode code, const String& message)
+        : value_(std::move(value)), code_(code), message_(message) {}
+
     T value_;
     ErrorCode code_;
     String message_;
@@ -104,6 +162,9 @@ public:
     ErrorCode code() const { return code_; }
     const String& message() const { return message_; }
     explicit operator bool() const { return is_success(); }
+
+    /// 见 Result<T>::error_result() —— void 版同样要能 `return r.error_result();`
+    ErrorResult error_result() const { return ErrorResult(code_, message_); }
 
 private:
     Result(ErrorCode code, const String& message)

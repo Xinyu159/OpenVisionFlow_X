@@ -309,6 +309,30 @@ void WebServer::accept_connections() {
 }
 
 void WebServer::handle_client(SOCKET client_socket) {
+    // 第 4 层 try/catch —— 这个函数跑在 accept() 循环 detach() 出去的线程上。
+    // web 服务是一个进程：线程入口漏了 catch 就是 std::terminate，
+    // 一个畸形请求就能把整个服务带走，而且 detached 线程里崩掉连栈回溯都难拿。
+    // 异常路径**必须**走到下面的 CLOSE_SOCKET，否则客户端一直挂着等响应。
+    try {
+        handle_client_inner(client_socket);
+    } catch (const std::exception& e) {
+        OVF_ERROR() << "handle_client: unhandled exception: " << e.what();
+        try {
+            HttpResponse err;
+            err.set_error(500, String("Internal server error: ") + e.what());
+            String body = build_response(err);
+            send(client_socket, body.c_str(), static_cast<int>(body.size()), 0);
+        } catch (...) {
+            // 连错误响应都发不出去就算了，下面照样关 socket
+        }
+    } catch (...) {
+        OVF_ERROR() << "handle_client: unhandled non-standard exception";
+    }
+
+    CLOSE_SOCKET(client_socket);
+}
+
+void WebServer::handle_client_inner(SOCKET client_socket) {
     // 接收请求 —— 必须循环读到完整 body。
     // 原先只 recv 一次 4096 字节：编辑器保存的流程 JSON 轻松超过 4KB，
     // 会被静默截断，json::parse 抛异常后变成 400 "Invalid JSON"，很难查。
@@ -395,8 +419,8 @@ void WebServer::handle_client(SOCKET client_socket) {
         if (n <= 0) break;   // 对端关闭或出错，放弃
         total_sent += static_cast<size_t>(n);
     }
-
-    CLOSE_SOCKET(client_socket);
+    // 不在这里 CLOSE_SOCKET：由外层 handle_client 统一关，
+    // 保证异常路径也一定会关掉。
 }
 
 bool WebServer::parse_request(const String& raw_request, HttpRequest& request) {
