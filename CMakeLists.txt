@@ -64,6 +64,15 @@ endif()
 option(ENABLE_CUDA "Enable CUDA acceleration" OFF)
 message(STATUS "CUDA acceleration: ${ENABLE_CUDA}")
 
+# 用户算子模块（你自己写的算子住在 ovf-nodes/）。
+# -DBUILD_OVF_NODES=OFF 会把整块摘掉，精确还原"没有这个模块"的构建。
+option(BUILD_OVF_NODES "Build the user operator module (ovf-nodes)" ON)
+message(STATUS "User operator module (ovf-nodes): ${BUILD_OVF_NODES}")
+
+# 测试模块（纯C++测试框架，无外部依赖）
+# 从下面挪到这儿：ovf-nodes/ 也要看它来决定建不建自己的测试。
+option(BUILD_TESTS "Build test suite" ON)
+
 # 全局定义
 add_compile_definitions(OVF_VERSION="${PROJECT_VERSION}")
 add_compile_definitions(OVF_PROJECT_NAME="${PROJECT_NAME}")
@@ -71,6 +80,13 @@ add_compile_definitions(OVF_PROJECT_NAME="${PROJECT_NAME}")
 # 子模块
 add_subdirectory(ovf-core)
 add_subdirectory(ovf-algorithm)
+
+# 用户算子模块。位置在 ovf-web-server 之前，因为后者要链 ovf-nodes-link。
+# 它只依赖 ovf-core —— 501 个老算子是历史资产，不是新算子的依赖。
+if(BUILD_OVF_NODES)
+    add_subdirectory(ovf-nodes)
+endif()
+
 add_subdirectory(ovf-sdk)
 add_subdirectory(ovf-sdk-python)
 add_subdirectory(ovf-web-server)
@@ -86,7 +102,6 @@ add_subdirectory(ovf-plugins)
 add_subdirectory(ovf-plugin-camera)
 
 # 测试模块（纯C++测试框架，无外部依赖）
-option(BUILD_TESTS "Build test suite" ON)
 if(BUILD_TESTS)
     add_subdirectory(tests)
     message(STATUS "Test suite enabled - pure C++ implementation (no external test libraries)")
