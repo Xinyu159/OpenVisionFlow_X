@@ -21,13 +21,29 @@ git cherry-pick <sha>                       # 只挑想要的
 git push origin main
 ```
 
-> **网络**：本机直连 `github.com` 会被 TLS 重置（挂满超时）。git 也必须走代理，
-> 且要注意 —— **代理只能通过环境变量给**，写进 `git config http.<url>.proxy` 反而会
-> 让 gnutls 握手失败。
+> **网络：这台机器上 git 走 GitHub 只有一个配方能通。**
+>
+> 直连 `github.com` 会被 TLS 重置（挂满超时、不报错）。但**走 HTTP 代理同样是坏的** ——
+> git 2.34.1 这一版是 gnutls 后端，`https_proxy`/`http_proxy` 会让它
+> `gnutls_handshake() failed: The TLS connection was non-properly terminated`。
+> 写进 `git config http.<url>.proxy` 也一样炸。
+>
+> 能通的是**只走 SOCKS5、并且把 http(s)_proxy 清空**（它俩优先级更高，会截胡）：
+>
 > ```bash
-> export https_proxy=http://127.0.0.1:17897 http_proxy=http://127.0.0.1:17897
+> unset https_proxy http_proxy
+> export all_proxy=socks5h://127.0.0.1:17897
+> git push origin main
 > ```
-> 已经全局设了 `http.version=HTTP/1.1`（HTTP/2 在这台机器上同样会被重置）。
+>
+> 注意是 `socks5h`（h = DNS 也在代理侧解析），不是 `socks5`。
+> 另外已全局设了 `http.version=HTTP/1.1` —— HTTP/2 在这台机器上也会被重置。
+>
+> 凭据走 `credential.helper=store`（`~/.git-credentials`，600 权限，不在仓库里）。
+> 令牌是 classic PAT，撤销后重新生成，然后：
+> ```bash
+> printf 'https://Xinyu159:<新令牌>@github.com\n' > ~/.git-credentials && chmod 600 ~/.git-credentials
+> ```
 
 ---
 
