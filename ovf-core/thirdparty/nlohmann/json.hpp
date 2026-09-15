@@ -461,7 +461,19 @@ private:
                 case '\n': result += "\\n"; break;
                 case '\r': result += "\\r"; break;
                 case '\t': result += "\\t"; break;
-                default: result += c;
+                case '\b': result += "\\b"; break;
+                case '\f': result += "\\f"; break;
+                default:
+                    // 其余控制字符必须转义，否则直接吐原始字节 = 非法 JSON。
+                    // 0x80 及以上的字节原样输出 —— 那就是合法的 UTF-8。
+                    if (static_cast<unsigned char>(c) < 0x20) {
+                        static const char* hex = "0123456789abcdef";
+                        result += "\\u00";
+                        result += hex[(static_cast<unsigned char>(c) >> 4) & 0xF];
+                        result += hex[static_cast<unsigned char>(c) & 0xF];
+                    } else {
+                        result += c;
+                    }
             }
         }
         return result;
@@ -567,10 +579,44 @@ private:
         throw std::runtime_error("Unterminated array");
     }
     
+    // 把 Unicode 码点按 UTF-8 追加到结果（\uXXXX 转义要用）
+    static void append_utf8(std::string& out, uint32_t cp) {
+        if (cp <= 0x7F) {
+            out += static_cast<char>(cp);
+        } else if (cp <= 0x7FF) {
+            out += static_cast<char>(0xC0 | (cp >> 6));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else if (cp <= 0xFFFF) {
+            out += static_cast<char>(0xE0 | (cp >> 12));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            out += static_cast<char>(0xF0 | (cp >> 18));
+            out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    }
+
+    // 从 s[pos] 起读 4 位十六进制，成功返回 true
+    static bool read_hex4(const std::string& s, size_t pos, uint32_t& out) {
+        if (pos + 4 > s.size()) return false;
+        out = 0;
+        for (int i = 0; i < 4; ++i) {
+            char h = s[pos + i];
+            out <<= 4;
+            if (h >= '0' && h <= '9')      out |= static_cast<uint32_t>(h - '0');
+            else if (h >= 'a' && h <= 'f') out |= static_cast<uint32_t>(h - 'a' + 10);
+            else if (h >= 'A' && h <= 'F') out |= static_cast<uint32_t>(h - 'A' + 10);
+            else return false;
+        }
+        return true;
+    }
+
     static json parse_string(const std::string& str, size_t& pos) {
         ++pos; // skip opening '"'
         std::string result;
-        
+
         while (pos < str.size() && str[pos] != '"') {
             if (str[pos] == '\\') {
                 ++pos;
@@ -579,9 +625,35 @@ private:
                     switch (esc) {
                         case '"': result += '"'; break;
                         case '\\': result += '\\'; break;
+                        case '/': result += '/'; break;
                         case 'n': result += '\n'; break;
                         case 'r': result += '\r'; break;
                         case 't': result += '\t'; break;
+                        case 'b': result += '\b'; break;
+                        case 'f': result += '\f'; break;
+                        case 'u': {
+                            // \uXXXX。原先落进 default 分支，只把反斜杠丢掉、留下 "u524d"，
+                            // 中文名走 python/requests 这类默认 ensure_ascii 的客户端存进
+                            // 流程文件就成了乱码 —— 浏览器 JSON.stringify 不转义非 ASCII，
+                            // 所以这条只在部分客户端上爆，更容易被漏掉。
+                            uint32_t cp = 0;
+                            if (!read_hex4(str, pos + 1, cp)) {
+                                result += esc;  // 非法转义，按原样保留
+                                break;
+                            }
+                            pos += 4;
+                            // UTF-16 代理对：高位 D800-DBFF 后面紧跟 \uDC00-\uDFFF
+                            if (cp >= 0xD800 && cp <= 0xDBFF && pos + 2 < str.size() &&
+                                str[pos + 1] == '\\' && str[pos + 2] == 'u') {
+                                uint32_t lo = 0;
+                                if (read_hex4(str, pos + 3, lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+                                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                                    pos += 6;
+                                }
+                            }
+                            append_utf8(result, cp);
+                            break;
+                        }
                         default: result += esc;
                     }
                     ++pos;

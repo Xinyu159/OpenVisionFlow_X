@@ -27,8 +27,11 @@ public:
     
     // 状态控制
     void pause();
-    void resume();
+    void resume();   // 只解除暂停，不清 stop 标记
     void stop();
+    // 清掉 pause/stop 两个标记，让同一个 context 能被下一轮执行复用。
+    // （resume() 不清 stopped_，stop 过一次的 context 若不 reset 就再也跑不动。）
+    void reset();
     bool is_paused() const { return paused_; }
     bool is_stopped() const { return stopped_; }
     
@@ -98,6 +101,10 @@ struct FlowDef {
  */
 struct FlowResult {
     bool success = false;
+    // 被 /api/flows/stop 叫停而中途退出（区别于"跑完了"和"跑挂了"）。
+    // 没有这个标记时，run() 里 break 出循环后照样返回 ok()，
+    // 取消掉的流程会显示成一整片成功。
+    bool stopped = false;
     String error_message;
     String failed_node_id;
     uint64_t total_time_us = 0;
@@ -131,6 +138,9 @@ public:
     // 流程管理
     Result<void> load_flow(const FlowDef& flow_def);
     Result<void> load_from_file(const String& filepath);
+    // 从 JSON 文本加载（load_from_file 读文件后也是走这里）。
+    // 同时认后端原生格式和前端编辑器格式：type_id/type、params、inputs{} 或顶层 connections[]。
+    Result<void> load_from_json(const String& json_text);
     Result<void> save_to_file(const String& filepath);
     void clear();
     

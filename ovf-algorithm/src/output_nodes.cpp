@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <cstring>  // std::memcpy —— MSVC 传递包含，GCC 需显式引入
 
 namespace ovf {
 namespace algorithm {

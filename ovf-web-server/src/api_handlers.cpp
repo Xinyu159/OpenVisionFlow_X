@@ -258,7 +258,40 @@ void ApiHandlers::register_all(WebServer& server) {
         [&server](const HttpRequest& req, HttpResponse& res) {
             handle_get_nodes(req, res, server);
         });
-    
+
+    // ── Web 编辑器契约路由 ─────────────────────────────────────────
+    // ovf-web-editor/js/api.js 调的是下面这套（复数 flows、扁平 files）。
+    // 原生那套 /api/flow/* 保留不动，两套并存，避免打断既有调用方。
+    server.register_route(HttpMethod::POST, "/api/flows/execute",
+        [&server](const HttpRequest& req, HttpResponse& res) {
+            handle_flows_execute(req, res, server);
+        });
+
+    server.register_route(HttpMethod::POST, "/api/flows/step",
+        [&server](const HttpRequest& req, HttpResponse& res) {
+            handle_flows_step(req, res, server);
+        });
+
+    server.register_route(HttpMethod::POST, "/api/flows/stop",
+        [&server](const HttpRequest& req, HttpResponse& res) {
+            handle_flows_stop(req, res, server);
+        });
+
+    server.register_route(HttpMethod::POST, "/api/files/save",
+        [&server](const HttpRequest& req, HttpResponse& res) {
+            handle_files_save(req, res, server);
+        });
+
+    server.register_route(HttpMethod::GET, "/api/files/load",
+        [&server](const HttpRequest& req, HttpResponse& res) {
+            handle_files_load(req, res, server);
+        });
+
+    server.register_route(HttpMethod::GET, "/api/health",
+        [&server](const HttpRequest& req, HttpResponse& res) {
+            handle_health(req, res, server);
+        });
+
     // GET /api/node/{type} - 获取节点详细信息
     server.register_route(HttpMethod::GET, "/api/node/{type}",
         [&server](const HttpRequest& req, HttpResponse& res) {
@@ -348,20 +381,20 @@ void ApiHandlers::handle_get_nodes(const HttpRequest& req, HttpResponse& res, We
     response["success"] = true;
     
     auto types = ovf::NodeFactory::instance().get_all_types();
-    
+
     json nodes = json::array();
     for (const auto& type : types) {
         const NodeInfo* info = ovf::NodeFactory::instance().get_info(type);
         if (info) {
-            json node = json::object();
+            // 返回完整 NodeInfo（含 inputs/outputs/params）。
+            // 原先只给 4 个字段，导致前端画布上的节点是 0 端口 0 参数——连不了线也配不了参数；
+            // 前端的注释写着"需要单独查询"，但它从没调过 /api/node/{type}，等于永远拿不到。
+            json node = node_info_to_json(*info);
             node["type_id"] = type;
-            node["name"] = info->name;
-            node["category"] = info->category;
-            node["description"] = info->description;
             nodes.push_back(node);
         }
     }
-    
+
     response["nodes"] = nodes;
     response["count"] = static_cast<int>(nodes.size());
     
@@ -535,6 +568,259 @@ void ApiHandlers::handle_flow_run(const HttpRequest& req, HttpResponse& res, Web
     
     res.set_json(response.dump());
     OVF_INFO() << "Flow execution completed: " << (result.success ? "success" : "failed");
+}
+
+// ── Web 编辑器契约 ──────────────────────────────────────────────────
+namespace {
+
+// NodeState → 前端识别的小写状态串
+// 前端 flow.js 把 status 直接映射成 CSS 类（.canvas-node.running/.success/.error）
+String node_state_to_str(NodeState s) {
+    switch (s) {
+        case NodeState::Idle:     return "idle";
+        case NodeState::Running:  return "running";
+        case NodeState::Success:  return "success";
+        case NodeState::Failed:   return "error";
+        case NodeState::Disabled: return "disabled";
+    }
+    return "idle";
+}
+
+// 把引擎里所有节点的状态打包成前端要的 nodeStates 数组
+json collect_node_states(const ovf::FlowEngine::Ptr& engine) {
+    json arr = json::array();
+    for (const auto& node : engine->get_all_nodes()) {
+        json ns = json::object();
+        ns["nodeId"] = node->instance_id();
+        ns["status"] = node_state_to_str(node->state());
+        arr.push_back(ns);
+    }
+    return arr;
+}
+
+} // namespace
+
+// POST /api/flows/execute —— body 就是前端 flowData 本身（不是 {filepath}）
+void ApiHandlers::handle_flows_execute(const HttpRequest& req, HttpResponse& res, WebServer& server) {
+    json response = json::object();
+
+    auto engine = server.flow_engine();
+    if (!engine) {
+        res.set_error(500, "Flow engine not initialized");
+        return;
+    }
+
+    auto& status = server.execution_status();
+    if (status.is_running) {
+        res.set_error(400, "Flow is already running");
+        return;
+    }
+
+    // 直接吃前端格式的流程 JSON：load_from_json 同时认前端的 type/connections[]
+    // 和后端的 type_id/inputs{}，所以编辑器导出的流程不用先落盘。
+    auto load_res = engine->load_from_json(req.body);
+    if (!load_res.is_success()) {
+        res.set_error(400, "Failed to load flow: " + load_res.message());
+        return;
+    }
+
+    // 复用 WebServer 上的 context，/api/flows/stop 才能从另一个连接线程叫停
+    auto& context = server.flow_context();
+    context.reset();   // 清掉上一轮可能残留的 stop 标记
+
+    engine->set_node_state_callback([&status](const String& node_id, NodeState state) {
+        status.current_node = node_id;
+        if (state == NodeState::Success) {
+            status.nodes_completed++;
+        }
+    });
+
+    status.is_running = true;
+    status.nodes_completed = 0;
+    status.total_nodes = static_cast<int>(engine->get_all_nodes().size());
+    status.last_error.clear();
+
+    auto result = engine->run(context);
+
+    status.is_running = false;
+    status.last_result = result;
+    status.execution_time_us = result.total_time_us;
+
+    response["success"] = result.success;
+    // 前端 flow.js 靠这个数组刷新每个节点的状态
+    response["nodeStates"] = collect_node_states(engine);
+    response["execution_time_ms"] = static_cast<double>(result.total_time_us) / 1000.0;
+
+    if (result.stopped) {
+        // 被 /api/flows/stop 叫停：既不是成功也不是失败，单独报出来，
+        // 免得前端把"跑了一半"显示成"全部通过"。
+        response["stopped"] = true;
+        response["message"] = "Flow execution stopped by request";
+    } else if (!result.success) {
+        status.last_error = result.error_message;
+        response["error"] = result.error_message;
+        response["failed_node"] = result.failed_node_id;
+    } else {
+        response["message"] = "Flow executed successfully";
+    }
+
+    res.set_json(response.dump());
+    OVF_INFO() << "POST /api/flows/execute: " << (result.success ? "success" : "failed");
+}
+
+// POST /api/flows/step —— body {flow: <flowData>, nodeId: "<id>"}，只跑指定节点
+void ApiHandlers::handle_flows_step(const HttpRequest& req, HttpResponse& res, WebServer& server) {
+    json response = json::object();
+
+    auto engine = server.flow_engine();
+    if (!engine) {
+        res.set_error(500, "Flow engine not initialized");
+        return;
+    }
+
+    json body;
+    try {
+        body = json::parse(req.body);
+    } catch (const std::exception& e) {
+        res.set_error(400, String("Invalid JSON: ") + e.what());
+        return;
+    }
+
+    // 前端发的是 {flow: {...}, nodeId: "..."}
+    if (body.contains("flow") && body["flow"].is_object()) {
+        auto load_res = engine->load_from_json(body["flow"].dump());
+        if (!load_res.is_success()) {
+            res.set_error(400, "Failed to load flow: " + load_res.message());
+            return;
+        }
+    }
+
+    const String node_id = body.value("nodeId", std::string(""));
+    if (node_id.empty()) {
+        res.set_error(400, "Missing nodeId parameter");
+        return;
+    }
+
+    auto& context = server.flow_context();
+    context.reset();
+
+    auto result = engine->run_node(node_id, context);
+
+    response["success"] = result.success;
+    response["nodeStates"] = collect_node_states(engine);
+    if (!result.success) {
+        response["error"] = result.error_message;
+        response["failed_node"] = result.failed_node_id;
+    }
+
+    res.set_json(response.dump());
+    OVF_INFO() << "POST /api/flows/step: node=" << node_id;
+}
+
+// POST /api/flows/stop —— 叫停正在执行的流程
+void ApiHandlers::handle_flows_stop(const HttpRequest& req, HttpResponse& res, WebServer& server) {
+    json response = json::object();
+
+    auto& status = server.execution_status();
+    if (!status.is_running) {
+        // 没在跑也返回成功：前端 stop 是幂等的，重复点不该报错
+        response["success"] = true;
+        response["message"] = "No flow is running";
+        res.set_json(response.dump());
+        return;
+    }
+
+    // 置 stopped_ 标记；run() 在每个节点边界检查它（flow.cpp 的 Sequential 分支）。
+    // 注意粒度：节点内部（例如一次长推理）无法被打断，最坏要等当前节点跑完。
+    server.flow_context().stop();
+
+    response["success"] = true;
+    response["message"] = "Flow execution stop requested";
+    res.set_json(response.dump());
+    OVF_INFO() << "POST /api/flows/stop: stop requested";
+}
+
+// POST /api/files/save —— body {filename, content}，把 content 原样写盘
+void ApiHandlers::handle_files_save(const HttpRequest& req, HttpResponse& res, WebServer& server) {
+    json response = json::object();
+    json body;
+    try {
+        body = json::parse(req.body);
+    } catch (const std::exception& e) {
+        res.set_error(400, String("Invalid JSON: ") + e.what());
+        return;
+    }
+
+    const String filename = body.value("filename", std::string(""));
+    const String content  = body.value("content",  std::string(""));
+    if (filename.empty()) {
+        res.set_error(400, "Missing filename parameter");
+        return;
+    }
+
+    // 只取 basename，挡住 ../ 之类的路径穿越
+    String safe = filename;
+    size_t slash = safe.find_last_of("/\\");
+    if (slash != String::npos) safe = safe.substr(slash + 1);
+    if (safe.empty() || safe == "." || safe == "..") {
+        res.set_error(400, "Invalid filename");
+        return;
+    }
+
+    const String path = server.flow_storage_dir() + "/" + safe;
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        res.set_error(500, "Failed to open file for writing: " + path);
+        return;
+    }
+    file << content;
+    file.close();
+
+    response["success"] = true;
+    response["message"] = "File saved successfully";
+    response["filepath"] = path;
+    res.set_json(response.dump());
+    OVF_INFO() << "POST /api/files/save: " << path;
+}
+
+// GET /api/files/load?filename=xxx —— 读回文件内容（前端拿它当流程 JSON 解析）
+void ApiHandlers::handle_files_load(const HttpRequest& req, HttpResponse& res, WebServer& server) {
+    String filename = get_param_value(req.params, "filename");
+    if (filename.empty()) {
+        res.set_error(400, "Missing filename parameter");
+        return;
+    }
+
+    String safe = filename;
+    size_t slash = safe.find_last_of("/\\");
+    if (slash != String::npos) safe = safe.substr(slash + 1);
+
+    const String path = server.flow_storage_dir() + "/" + safe;
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        res.set_error(404, "File not found: " + safe);
+        return;
+    }
+
+    std::ostringstream content;
+    content << file.rdbuf();
+    file.close();
+
+    // 前端 api.js loadFlow() 期望拿到流程 JSON 本身（它自己 JSON.parse）
+    res.set_json(content.str());
+}
+
+// GET /api/health —— 探活。前端 api.js checkConnection() 靠它区分"后端在不在"。
+void ApiHandlers::handle_health(const HttpRequest& req, HttpResponse& res, WebServer& server) {
+    json response = json::object();
+    response["success"] = true;
+    response["status"] = "ok";
+    response["service"] = "ovf-web-server";
+    response["version"] = "0.2.0";
+    response["node_count"] = static_cast<int>(
+        ovf::NodeFactory::instance().get_all_types().size());
+    response["is_running"] = server.execution_status().is_running;
+    res.set_json(response.dump());
 }
 
 // POST /api/flow/step - 单步执行

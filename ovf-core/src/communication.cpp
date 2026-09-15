@@ -9,15 +9,19 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "ws2_32.lib")
+    using ovf_socklen_t = int;  // Winsock 的 accept/recvfrom 长度参数是 int*
 #else
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <arpa/inet.h>
     #include <unistd.h>
+    #include <fcntl.h>    // open/O_RDWR/O_NOCTTY —— 串口分支需要
+    #include <termios.h>  // termios/tcgetattr/tcsetattr/TCSANOW/CLOCAL/CREAD
     #define SOCKET int
     #define INVALID_SOCKET -1
     #define SOCKET_ERROR -1
     #define closesocket close
+    using ovf_socklen_t = socklen_t;
 #endif
 
 #include <cstring>
@@ -350,7 +354,7 @@ Result<void> TcpServer::close_client(int client_fd) {
 void TcpServer::server_thread() {
     while (running_ && server_fd_ != -1) {
         sockaddr_in client_addr;
-        int addr_len = sizeof(client_addr);
+        ovf_socklen_t addr_len = sizeof(client_addr);
         
         SOCKET client_fd = accept(server_fd_, (sockaddr*)&client_addr, &addr_len);
         if (client_fd == INVALID_SOCKET) {
@@ -538,7 +542,7 @@ void UdpSocket::receive_thread() {
     constexpr int BUFFER_SIZE = 4096;
     char buffer[BUFFER_SIZE];
     sockaddr_in from_addr;
-    int from_len = sizeof(from_addr);
+    ovf_socklen_t from_len = sizeof(from_addr);
     
     while (running_ && socket_fd_ != -1) {
         int received = recvfrom(socket_fd_, buffer, BUFFER_SIZE, 0,
@@ -562,6 +566,9 @@ void UdpSocket::receive_thread() {
 }
 
 // ============== SerialPort ==============
+
+SerialPort::SerialPort(const CommDeviceInfo& info)
+    : SerialPort(info, SerialConfig{}) {}
 
 SerialPort::SerialPort(const CommDeviceInfo& info, const SerialConfig& config)
     : info_(info), config_(config) {}

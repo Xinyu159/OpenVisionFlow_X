@@ -47,12 +47,11 @@ target_include_directories(ovf-web-server
         ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-algorithm/include
 )
 
-# 链接库
+# 链接库（ws2_32 是 Windows 专属，只在下面 if(WIN32) 块里链，不能放这里）
 target_link_libraries(ovf-web-server
     PRIVATE
         ovf-core
         ovf-algorithm
-        ws2_32
 )
 
 # Windows特定设置

@@ -1313,7 +1313,11 @@ const OVF_Editor = {
 
             this.render();
 
-            if (result.success) {
+            if (result.stopped) {
+                // 被叫停：没跑完也不算失败，说清楚是"停的"
+                this.showMessage('流程已停止（未执行完）');
+                this.updateStatus('已停止', 'idle');
+            } else if (result.success) {
                 this.showMessage('流程执行成功');
                 this.updateStatus('完成', 'success');
             } else {

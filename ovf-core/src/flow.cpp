@@ -33,6 +33,10 @@ void FlowContext::resume() {
 void FlowContext::stop() {
     stopped_ = true;
 }
+void FlowContext::reset() {
+    paused_ = false;
+    stopped_ = false;
+}
 
 void FlowContext::set_variable(const String& key, const Data& value) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -113,6 +117,51 @@ Result<void> FlowEngine::load_flow(const FlowDef& flow_def) {
     return Result<void>::success();
 }
 
+// ── JSON ⇄ FlowDef 编解码辅助 ──────────────────────────────────────
+// 注意：本仓库的 thirdparty/nlohmann/json.hpp 是自带的"简化版"实现，
+// 对象的迭代器是 object_begin()/object_end()；begin()/end() 只对数组有效，
+// 对对象调用会 check_type 抛异常。原先"简化版json不支持迭代器"的注释即由此而来。
+namespace {
+
+// JSON 标量 → Data。只处理 bool/number/string，其它（null/数组/对象）返回 false。
+bool json_value_to_data(const json& v, Data& out) {
+    if (v.is_boolean()) { out = Data(v.get_bool());    return true; }
+    if (v.is_number())  { out = Data(v.get_double());  return true; }
+    if (v.is_string())  { out = Data(v.get_string());  return true; }
+    return false;
+}
+
+// 节点的 params 对象 → ParamSet。前端与后端两种写法都是 {参数id: 值} 扁平对象。
+void parse_node_params(const json& params_j, ParamSet& out) {
+    if (!params_j.is_object()) return;
+    for (auto it = params_j.object_begin(); it != params_j.object_end(); ++it) {
+        Data d;
+        if (json_value_to_data(it->second, d)) {
+            out.set(it->first, d);
+        }
+    }
+}
+
+// Data → JSON 标量。只写 bool/number/string；图像/区域等大对象不落盘（与 parse 对称）。
+bool data_to_json_value(const Data& d, json& out) {
+    if (d.is_bool())   { out = json(d.as_bool());    return true; }
+    if (d.is_number()) { out = json(d.as_number());  return true; }
+    if (d.is_string()) { out = json(d.as_string());  return true; }
+    return false;
+}
+
+// 把端口"下标"解析成端口 id（前端的 connections[] 用的是下标，不是 id）。
+// 下标越界或节点类型未注册时返回空串，由调用方决定是忽略还是报错。
+String resolve_port_id(const String& type_id, bool is_input, int index) {
+    const NodeInfo* info = NodeFactory::instance().get_info(type_id);
+    if (!info) return "";
+    const Vector<DataPort>& ports = is_input ? info->inputs : info->outputs;
+    if (index < 0 || static_cast<size_t>(index) >= ports.size()) return "";
+    return ports[index].id;
+}
+
+} // namespace
+
 Result<void> FlowEngine::load_from_file(const String& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
@@ -121,48 +170,121 @@ Result<void> FlowEngine::load_from_file(const String& filepath) {
             "Failed to open file: " + filepath
         );
     }
-    
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+    return load_from_json(content);
+}
+
+Result<void> FlowEngine::load_from_json(const String& json_text) {
     try {
-        // 读取文件内容
-        std::string content((std::istreambuf_iterator<char>(file)),
-                            std::istreambuf_iterator<char>());
-        json j = json::parse(content);
-        
+        json j = json::parse(json_text);
+
         FlowDef flow_def;
-        flow_def.id = j["id"].get_string();
-        flow_def.name = j["name"].get_string();
+        // id/name 原先用 get_string()，字段缺失会抛异常变成"JSON parse error"，
+        // 对前端导出的文件太苛刻（前端的 top-level id 是自动生成的、可能没有 name）。改为可选。
+        flow_def.id = j.value("id", std::string(""));
+        flow_def.name = j.value("name", std::string(""));
         flow_def.description = j.value("description", std::string(""));
+        // 版本号：前端放在 metadata.version 里，后端放在顶层 version
         flow_def.version = j.value("version", std::string("1.0"));
-        
+        if (flow_def.version == "1.0" && j.contains("metadata") && j["metadata"].is_object()) {
+            flow_def.version = j["metadata"].value("version", std::string("1.0"));
+        }
+
         // 解析节点
-        auto nodes_j = j["nodes"];
-        if (nodes_j.is_array()) {
+        if (j.contains("nodes") && j["nodes"].is_array()) {
+            const json& nodes_j = j["nodes"];
             for (size_t i = 0; i < nodes_j.size(); ++i) {
-                auto node_j = nodes_j[i];
+                const json& node_j = nodes_j[i];
                 FlowDef::NodeInstance node_inst;
-                node_inst.id = node_j["id"].get_string();
-                node_inst.type_id = node_j["type_id"].get_string();
+                node_inst.id = node_j.value("id", std::string(""));
+                // type_id 是后端字段名，type 是前端字段名，两种都认
+                node_inst.type_id = node_j.value("type_id", std::string(""));
+                if (node_inst.type_id.empty()) {
+                    node_inst.type_id = node_j.value("type", std::string(""));
+                }
                 node_inst.name = node_j.value("name", std::string(""));
                 node_inst.x = node_j.value("x", 0);
                 node_inst.y = node_j.value("y", 0);
-                node_inst.enabled = node_j.value("enabled", true);
-
-                // 解析参数（简化：直接存储json字符串）
-                if (node_j.contains("params") && node_j["params"].is_object()) {
-                    // 存储原始json以便节点初始化时使用
-                    // 后续节点加载时会处理这些参数
+                // enabled 是后端字段，disabled 是前端字段（语义相反）
+                if (node_j.contains("disabled")) {
+                    node_inst.enabled = !node_j.value("disabled", false);
+                } else {
+                    node_inst.enabled = node_j.value("enabled", true);
                 }
 
-                // 解析输入连接
+                // 解析参数：{参数id: 值} 扁平对象 → ParamSet
+                if (node_j.contains("params")) {
+                    parse_node_params(node_j["params"], node_inst.params);
+                }
+
+                // 解析连接（后端原生格式）：inputs 是 {输入端口id: {source_node, source_port}}
                 if (node_j.contains("inputs") && node_j["inputs"].is_object()) {
-                    // 简化版json不支持迭代器，需要显式处理
-                    // 这里暂时跳过，后续完善
+                    const json& inputs_j = node_j["inputs"];
+                    for (auto it = inputs_j.object_begin(); it != inputs_j.object_end(); ++it) {
+                        const json& conn_j = it->second;
+                        if (!conn_j.is_object()) continue;
+                        FlowDef::NodeInstance::InputConnection conn;
+                        conn.source_node_id = conn_j.value("source_node", std::string(""));
+                        conn.source_port    = conn_j.value("source_port", std::string(""));
+                        if (!conn.source_node_id.empty()) {
+                            node_inst.input_connections[it->first] = conn;
+                        }
+                    }
                 }
 
                 flow_def.nodes.push_back(node_inst);
             }
         }
-        
+
+        // 解析连接（前端格式）：顶层 connections[] 数组，端口用"下标"而非 id。
+        //   {"fromNode": <节点id>, "fromPort": <输出端口下标>, "toNode": ..., "toPort": ...}
+        // 需要借 NodeFactory 里该类型的 NodeInfo 把下标翻回端口 id。
+        if (j.contains("connections") && j["connections"].is_array()) {
+            // 建 id → 节点下标 的索引，便于按 id 找节点
+            HashMap<String, size_t> id_to_index;
+            for (size_t i = 0; i < flow_def.nodes.size(); ++i) {
+                id_to_index[flow_def.nodes[i].id] = i;
+            }
+
+            const json& conns_j = j["connections"];
+            for (size_t i = 0; i < conns_j.size(); ++i) {
+                const json& c = conns_j[i];
+                if (!c.is_object()) continue;
+
+                const String from_node = c.value("fromNode", std::string(""));
+                const String to_node   = c.value("toNode",   std::string(""));
+                auto to_it = id_to_index.find(to_node);
+                if (to_it == id_to_index.end()) continue;   // 目标节点不存在，忽略这条连线
+
+                FlowDef::NodeInstance& target = flow_def.nodes[to_it->second];
+
+                // fromPort / toPort：优先当下标解析，解析不了再当端口 id 用
+                String from_port, to_port;
+                auto from_idx_it = id_to_index.find(from_node);
+                const String from_type = (from_idx_it != id_to_index.end())
+                                       ? flow_def.nodes[from_idx_it->second].type_id : "";
+
+                if (c.contains("fromPort") && c["fromPort"].is_number()) {
+                    from_port = resolve_port_id(from_type, false, c["fromPort"].get_int());
+                } else if (c.contains("fromPort") && c["fromPort"].is_string()) {
+                    from_port = c["fromPort"].get_string();
+                }
+                if (c.contains("toPort") && c["toPort"].is_number()) {
+                    to_port = resolve_port_id(target.type_id, true, c["toPort"].get_int());
+                } else if (c.contains("toPort") && c["toPort"].is_string()) {
+                    to_port = c["toPort"].get_string();
+                }
+
+                if (from_port.empty() || to_port.empty()) continue;   // 端口解析不出来，忽略
+
+                FlowDef::NodeInstance::InputConnection conn;
+                conn.source_node_id = from_node;
+                conn.source_port    = from_port;
+                target.input_connections[to_port] = conn;
+            }
+        }
+
         flow_def.created_time = j.value("created_time", std::string(""));
         flow_def.modified_time = j.value("modified_time", std::string(""));
         flow_def.author = j.value("author", std::string(""));
@@ -202,8 +324,15 @@ Result<void> FlowEngine::save_to_file(const String& filepath) {
         node_j["y"] = node_inst.y;
         node_j["enabled"] = node_inst.enabled;
 
-        // 保存参数（简化）
-        node_j["params"] = json::object();
+        // 保存参数（原先硬编码成空对象，参数全丢）
+        json params_j = json::object();
+        for (auto it = node_inst.params.begin(); it != node_inst.params.end(); ++it) {
+            json v;
+            if (data_to_json_value(it->second, v)) {
+                params_j[it->first] = v;
+            }
+        }
+        node_j["params"] = params_j;
 
         // 保存连接
         json inputs_j = json::object();
@@ -252,40 +381,58 @@ Vector<INode::Ptr> FlowEngine::get_all_nodes() const {
 FlowResult FlowEngine::run(FlowContext& context) {
     auto start_time = std::chrono::high_resolution_clock::now();
     
+    bool stopped_by_request = false;
+
     switch (execution_mode_) {
         case ExecutionMode::Sequential:
             for (const auto& node_id : execution_order_) {
-                auto node = nodes_[node_id];
-                if (!node || !node->is_enabled()) continue;
-                
-                auto result = execute_node(node, context);
-                if (!result.success) {
-                    return result;
-                }
-                
+                // 每轮开头先查停：停止也可能发生在上一轮的暂停等待里，
+                // 检查放这里才能保证"叫停之后不会再多跑一个节点"。
                 if (context.is_stopped()) {
+                    stopped_by_request = true;
                     break;
                 }
-                
+
+                auto node = nodes_[node_id];
+                if (!node || !node->is_enabled()) continue;
+
+                auto result = execute_node(node, context);
+                if (!result.success) {
+                    // 节点报错的同时又被叫停 —— 算取消，不算失败
+                    result.stopped = context.is_stopped();
+                    return result;
+                }
+
                 // 等待暂停恢复
                 while (context.is_paused() && !context.is_stopped()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
             }
+            // 循环自然走完（在最后一个节点之后才叫停）也要认出来
+            if (context.is_stopped()) {
+                stopped_by_request = true;
+            }
             break;
-            
+
         case ExecutionMode::Parallel:
             return execute_parallel(context);
-            
+
         case ExecutionMode::DataDriven:
             return execute_data_driven(context);
     }
-    
+
     auto end_time = std::chrono::high_resolution_clock::now();
     auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-    
+
     FlowResult result = FlowResult::ok();
     result.total_time_us = total_time.count();
+
+    if (stopped_by_request) {
+        // 中途被叫停 = 没跑完。这里报成功，前端就会把整条流程画成全绿。
+        result.success = false;
+        result.stopped = true;
+        result.error_message = "Flow execution stopped by request";
+    }
     return result;
 }
 

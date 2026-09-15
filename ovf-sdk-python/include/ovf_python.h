@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>  // size_t —— MSVC 传递包含，GCC 需显式引入
 
 #ifdef __cplusplus
 extern "C" {

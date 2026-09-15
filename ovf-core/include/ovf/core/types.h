@@ -11,6 +11,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <cmath>  // std::sqrt/cos/sin -- MSVC 传递包含，GCC 需显式引入
 #include <chrono>
 #include <functional>
 #include <unordered_map>

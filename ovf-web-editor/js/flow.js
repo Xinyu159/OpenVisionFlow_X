@@ -61,8 +61,13 @@ const OVF_Flow = {
      * 添加节点到流程
      */
     addNode(nodeType, x, y) {
+        // id 必须先算出来：下面对象字面量里的 `${node.id}_input_${idx}` 会在
+        // 字面量求值期间读 node —— 那时 const node 还在 TDZ 里，直接
+        // ReferenceError。原来写成 id: OVF_API.generateId() 内联，等于每次
+        // 拖节点进画布就抛异常。
+        const nodeId = OVF_API.generateId();
         const node = {
-            id: OVF_API.generateId(),
+            id: nodeId,
             type: nodeType.type,
             name: nodeType.name,
             x: x,
@@ -71,12 +76,12 @@ const OVF_Flow = {
             height: this.calculateNodeHeight(nodeType),
             inputs: nodeType.inputs ? nodeType.inputs.map((inp, idx) => ({
                 ...inp,
-                id: `${node.id}_input_${idx}`,
+                id: `${nodeId}_input_${idx}`,
                 connected: false
             })) : [],
             outputs: nodeType.outputs ? nodeType.outputs.map((out, idx) => ({
                 ...out,
-                id: `${node.id}_output_${idx}`,
+                id: `${nodeId}_output_${idx}`,
                 connected: false
             })) : [],
             params: this.getDefaultParams(nodeType),

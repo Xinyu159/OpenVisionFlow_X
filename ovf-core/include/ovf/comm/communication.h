@@ -232,7 +232,10 @@ public:
         uint8_t flow_control = 0;  // 0=无, 1=硬件, 2=软件
     };
     
-    explicit SerialPort(const CommDeviceInfo& info, const SerialConfig& config = {});
+    // 注：不能写成 config = {} —— SerialConfig 是带NSDMI的嵌套类，
+    // 在外层类作用域内不算完整类型，GCC 依标准拒绝（MSVC 宽松故原代码可编）。用重载替代。
+    explicit SerialPort(const CommDeviceInfo& info);
+    explicit SerialPort(const CommDeviceInfo& info, const SerialConfig& config);
     ~SerialPort();
     
     const CommDeviceInfo& info() const override { return info_; }

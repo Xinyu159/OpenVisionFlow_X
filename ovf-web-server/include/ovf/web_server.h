@@ -17,6 +17,15 @@
     #ifdef DELETE
         #undef DELETE
     #endif
+#else
+    // POSIX 分支 —— 原先缺失，导致 Linux 上 SOCKET 类型未定义
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+    #define SOCKET int
+    #define INVALID_SOCKET -1
+    #define SOCKET_ERROR -1
 #endif
 
 #include "ovf/core/types.h"
@@ -147,6 +156,19 @@ public:
     FlowExecutionMonitor::Ptr execution_monitor() const { return execution_monitor_; }
 
     /**
+     * @brief 获取流程上下文
+     * 执行 handler 在连接线程里同步跑，stop handler 在另一个连接线程里，
+     * 两者必须共用同一个 context 才能叫停 —— 所以 context 挂在 WebServer 上而不是栈上。
+     */
+    ovf::FlowContext& flow_context() { return flow_context_; }
+
+    /**
+     * @brief 设置流程文件存储目录（供 /api/files/save 与 /api/files/load 使用）
+     */
+    void set_storage_dir(const String& dir) { storage_dir_ = dir; }
+    const String& flow_storage_dir() const { return storage_dir_; }
+
+    /**
      * @brief 设置静态文件目录
      * @param directory 静态文件根目录
      */
@@ -209,6 +231,7 @@ private:
     FlowExecutionMonitor::Ptr execution_monitor_;
     
     String static_dir_;  // 静态文件目录
+    String storage_dir_ = "flows";  // 流程文件存储目录（/api/files/*）
     
     std::mutex mutex_;
 };
@@ -232,6 +255,17 @@ public:
     static void handle_flow_step(const HttpRequest& req, HttpResponse& res, WebServer& server);
     static void handle_flow_status(const HttpRequest& req, HttpResponse& res, WebServer& server);
     static void handle_get_image(const HttpRequest& req, HttpResponse& res, WebServer& server);
+
+    // ── Web 编辑器（ovf-web-editor）契约 ───────────────────────────
+    // 前端 js/api.js 调的是 /api/flows/* 与 /api/files/*，与后端原生的
+    // /api/flow/*（单数、以 filepath 为参数）是两套契约。以下 handler 提供
+    // 前端那一套，内部复用同一套引擎与编解码。
+    static void handle_flows_execute(const HttpRequest& req, HttpResponse& res, WebServer& server);
+    static void handle_flows_step(const HttpRequest& req, HttpResponse& res, WebServer& server);
+    static void handle_flows_stop(const HttpRequest& req, HttpResponse& res, WebServer& server);
+    static void handle_files_save(const HttpRequest& req, HttpResponse& res, WebServer& server);
+    static void handle_files_load(const HttpRequest& req, HttpResponse& res, WebServer& server);
+    static void handle_health(const HttpRequest& req, HttpResponse& res, WebServer& server);
     
     // 执行日志可视化相关API
     static void handle_execution_history(const HttpRequest& req, HttpResponse& res, WebServer& server);

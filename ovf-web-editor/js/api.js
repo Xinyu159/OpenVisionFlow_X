@@ -4,8 +4,13 @@
  */
 
 const OVF_API = {
-    // 默认后端地址
-    baseURL: 'http://localhost:8080',
+    // 后端地址。
+    // 页面本身就是 ovf-web-server 发出来的（静态目录 ovf-web-editor），
+    // 所以用同源地址即可；写死 8080 的话，后端换端口（-p）就全断。
+    // file:// 直接打开时没有 origin，退回 localhost:8080。
+    baseURL: (typeof window !== 'undefined' && window.location.protocol.startsWith('http'))
+        ? window.location.origin
+        : 'http://localhost:8080',
 
     // API 端点
     endpoints: {
@@ -124,7 +129,10 @@ const OVF_API = {
 
             // 处理API返回的节点数据格式
             if (result && result.success && result.nodes) {
-                // 将后端NodeInfo格式转换为前端期望的格式
+                // 将后端NodeInfo格式转换为前端期望的格式。
+                // 后端每个节点自带 inputs/outputs/params（共 501 个），
+                // 原先这里硬编码成三个空数组，等于把端口的名字、类型和参数
+                // 全丢掉 —— 画布上画不出端口，属性面板也没有参数可填。
                 return result.nodes.map(node => ({
                     type: node.type_id,
                     name: node.name,
@@ -132,9 +140,43 @@ const OVF_API = {
                     description: node.description,
                     icon: this.getNodeIcon(node.category),
                     color: this.getNodeColor(node.category),
-                    inputs: [],  // 后端返回的节点信息中不包含端口信息，需要单独查询
-                    outputs: [],
-                    params: []
+                    // 端口：后端 {id, name, type, required} → 前端 {name, label, type}。
+                    // name 用端口 id（后端按端口名连线的），label 才是给人看的。
+                    // 连接里存的是端口"下标"（flow.js fromPort/toPort），
+                    // 后端的 resolve_port_id 会按下标翻回 id，两边对得上。
+                    inputs: (node.inputs || []).map(port => ({
+                        name: port.id,
+                        label: port.name,
+                        type: port.type
+                    })),
+                    outputs: (node.outputs || []).map(port => ({
+                        name: port.id,
+                        label: port.name,
+                        type: port.type
+                    })),
+                    // 参数：后端 {id, name, type, default, options} → 前端 {name, label, type, ...}。
+                    // editor.js 只认 select/number/textarea/checkbox 这几种，
+                    // 其余一律退化成文本框 —— 所以 boolean 必须映射成 checkbox，
+                    // 带 options 的 string 映射成 select。
+                    params: (node.params || []).map(param => {
+                        const hasOptions = Array.isArray(param.options) && param.options.length > 0;
+                        let type = param.type;
+                        if (type === 'boolean') {
+                            type = 'checkbox';
+                        } else if (type === 'string' && hasOptions) {
+                            type = 'select';
+                        }
+                        const mapped = {
+                            name: param.id,
+                            label: param.name,
+                            type: type,
+                            default: param.default
+                        };
+                        if (hasOptions) mapped.options = param.options;
+                        if (param.min !== undefined) mapped.min = param.min;
+                        if (param.max !== undefined) mapped.max = param.max;
+                        return mapped;
+                    })
                 }));
             }
 

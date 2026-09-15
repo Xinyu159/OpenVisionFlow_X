@@ -16,12 +16,17 @@
     #define CLOSE_SOCKET closesocket
     #define IS_VALID_SOCKET(s) ((s) != INVALID_SOCKET)
     #define SOCKET_ERROR_CODE SOCKET_ERROR
+    using ovf_socklen_t = int;  // Winsock 的 accept 长度参数是 int*
 #else
-    #define SOCKET int
-    #define INVALID_SOCKET -1
+    // POSIX socket 头 —— 原先缺失，导致 AF_INET/SOCK_STREAM/socket()/SO_REUSEADDR 未声明
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
     #define CLOSE_SOCKET close
     #define IS_VALID_SOCKET(s) ((s) >= 0)
     #define SOCKET_ERROR_CODE -1
+    using ovf_socklen_t = socklen_t;
 #endif
 
 namespace ovf {
@@ -263,7 +268,9 @@ void WebServer::accept_connections() {
         FD_ZERO(&read_fds);
         FD_SET(server_socket_, &read_fds);
         
-        int select_result = select(0, &read_fds, nullptr, nullptr, &timeout);
+        // nfds：Winsock 忽略此参数，Linux 内核却用它决定拷贝多少 fd_set 字节 ——
+        // 传 0 会导致内核认为"无 fd 可监视"，只睡超时、永不报告可读，accept 循环空转。
+        int select_result = select(server_socket_ + 1, &read_fds, nullptr, nullptr, &timeout);
         if (select_result == SOCKET_ERROR_CODE) {
             if (running_) {
                 OVF_ERROR() << "select() failed";
@@ -278,7 +285,7 @@ void WebServer::accept_connections() {
         
         // 接受新连接
         sockaddr_in client_addr;
-        int client_addr_len = sizeof(client_addr);
+        ovf_socklen_t client_addr_len = sizeof(client_addr);
         SOCKET client_socket = accept(server_socket_, 
                                        reinterpret_cast<sockaddr*>(&client_addr), 
                                        &client_addr_len);
@@ -302,17 +309,53 @@ void WebServer::accept_connections() {
 }
 
 void WebServer::handle_client(SOCKET client_socket) {
-    // 接收请求
+    // 接收请求 —— 必须循环读到完整 body。
+    // 原先只 recv 一次 4096 字节：编辑器保存的流程 JSON 轻松超过 4KB，
+    // 会被静默截断，json::parse 抛异常后变成 400 "Invalid JSON"，很难查。
+    String raw_request;
     char buffer[4096];
-    int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
 
-    if (bytes_received <= 0) {
+    while (true) {
+        int bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
+        if (bytes_received <= 0) break;
+        raw_request.append(buffer, static_cast<size_t>(bytes_received));
+
+        // 头部结束位置：\r\n\r\n 优先，退回 \n\n
+        size_t body_start = String::npos;
+        size_t crlf = raw_request.find("\r\n\r\n");
+        if (crlf != String::npos) {
+            body_start = crlf + 4;
+        } else {
+            size_t lf = raw_request.find("\n\n");
+            if (lf != String::npos) body_start = lf + 2;
+        }
+        if (body_start == String::npos) continue;   // 头部还没收完，继续读
+
+        // 头部齐了，按 Content-Length 决定还要读多少
+        String head = raw_request.substr(0, body_start);
+        std::transform(head.begin(), head.end(), head.begin(), ::tolower);
+        size_t content_length = 0;
+        size_t cl_pos = head.find("content-length:");
+        if (cl_pos != String::npos) {
+            size_t val_start = cl_pos + 15;
+            size_t val_end = head.find_first_of("\r\n", val_start);
+            if (val_end == String::npos) val_end = head.size();
+            try {
+                content_length = static_cast<size_t>(
+                    std::stoul(head.substr(val_start, val_end - val_start)));
+            } catch (...) {
+                content_length = 0;
+            }
+        }
+
+        if (content_length == 0) break;                        // 无 body（GET 等）
+        if (raw_request.size() >= body_start + content_length) break;   // body 收全了
+    }
+
+    if (raw_request.empty()) {
         CLOSE_SOCKET(client_socket);
         return;
     }
-
-    buffer[bytes_received] = '\0';
-    String raw_request(buffer);
 
     // 解析请求
     HttpRequest request;
@@ -320,6 +363,12 @@ void WebServer::handle_client(SOCKET client_socket) {
 
     if (!parse_request(raw_request, request)) {
         response.set_error(400, "Invalid HTTP request");
+    } else if (request.method == HttpMethod::OPTIONS) {
+        // CORS 预检：必须回 200 空体。原先走 match_route 落到 404，
+        // 浏览器跨端口访问时预检失败，编辑器的所有请求都被拦掉。
+        response.status_code = 200;
+        response.status_text = "OK";
+        response.body = "";
     } else {
         // 检查是否是API请求
         if (request.path.substr(0, 5) == "/api/") {
@@ -336,9 +385,16 @@ void WebServer::handle_client(SOCKET client_socket) {
         }
     }
 
-    // 发送响应
+    // 发送响应 —— 必须循环：单次 send 不保证把整个缓冲区发完，
+    // /api/nodes 这类几百 KB 的响应会被静默截断，前端拿到半个 JSON。
     String response_str = build_response(response);
-    send(client_socket, response_str.c_str(), static_cast<int>(response_str.length()), 0);
+    size_t total_sent = 0;
+    while (total_sent < response_str.size()) {
+        int n = send(client_socket, response_str.c_str() + total_sent,
+                     static_cast<int>(response_str.size() - total_sent), 0);
+        if (n <= 0) break;   // 对端关闭或出错，放弃
+        total_sent += static_cast<size_t>(n);
+    }
 
     CLOSE_SOCKET(client_socket);
 }

@@ -6,6 +6,7 @@
 #include "ovf/algorithm/communication_nodes.h"
 #include "ovf/core/logger.h"
 #include <sstream>
+#include <cstring>  // std::memcpy —— MSVC 传递包含，GCC 需显式引入
 
 namespace ovf {
 namespace algorithm {

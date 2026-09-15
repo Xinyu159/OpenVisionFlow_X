@@ -116,13 +116,18 @@ protected:
     uint64_t last_execute_time_ = 0;
 };
 
+// 导出宏：确保DLL/EXE边界只有一个实例，静态局部变量会导致各自独立实例、节点注册丢失。
+// Windows 用 __declspec，Linux/GCC 用 visibility 属性 —— 与 ovf/api.h 的 OVF_API 同一模式。
+#if defined(_WIN32) || defined(__CYGWIN__)
+    #define OVF_CORE_API __declspec(dllexport)
+#else
+    #define OVF_CORE_API __attribute__((visibility("default")))
+#endif
+
 /**
  * @brief 节点工厂
- * 
- * 必须使用__declspec(dllexport)确保DLL/EXE边界只有一个实例
- * 静态局部变量会导致DLL和EXE各自独立实例，造成节点注册丢失
  */
-class __declspec(dllexport) NodeFactory {
+class OVF_CORE_API NodeFactory {
 public:
     using Creator = std::function<INode::Ptr(const String&)>;
     

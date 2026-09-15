@@ -9,6 +9,8 @@
 #include <iostream>
 #include <string>
 #include <csignal>
+#include <filesystem>
+#include <system_error>
 
 using namespace ovf;
 using namespace ovf::web;
@@ -36,6 +38,8 @@ void print_help() {
     std::cout << "  -p, --port <port>    Server port (default: 8080)" << std::endl;
     std::cout << "  -h, --help           Show this help message" << std::endl;
     std::cout << "  -v, --verbose        Enable verbose logging" << std::endl;
+    std::cout << "  -d, --flows-dir <dir>  Where /api/files/* stores flows (default: flows)" << std::endl;
+    std::cout << "  -w, --web-dir <dir>    Frontend dir to serve (default: auto-detect ovf-web-editor)" << std::endl;
     std::cout << std::endl;
     std::cout << "API Endpoints:" << std::endl;
     std::cout << "  GET  /api/nodes          - Get all available node types" << std::endl;
@@ -47,31 +51,59 @@ void print_help() {
     std::cout << "  GET  /api/flow/status    - Get execution status" << std::endl;
     std::cout << "  GET  /api/image          - Get current image (base64)" << std::endl;
     std::cout << std::endl;
+    std::cout << "Web editor endpoints (ovf-web-editor):" << std::endl;
+    std::cout << "  GET  /api/health         - Health probe" << std::endl;
+    std::cout << "  POST /api/flows/execute  - Run a frontend-format flow" << std::endl;
+    std::cout << "  POST /api/flows/step     - Run one node of the loaded flow" << std::endl;
+    std::cout << "  POST /api/flows/stop     - Cancel the running flow" << std::endl;
+    std::cout << "  POST /api/files/save     - Save flow JSON to the flows dir" << std::endl;
+    std::cout << "  GET  /api/files/load     - Load flow JSON from the flows dir" << std::endl;
+    std::cout << std::endl;
 }
 
 int main(int argc, char* argv[]) {
     int port = 8080;
     bool verbose = false;
-    
+    std::string flows_dir = "flows";  // /api/files/* 的落盘目录，可用 -d 覆盖
+    std::string web_dir;              // 前端目录，留空则自动探测
+
     // 解析命令行参数
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        
+
         if (arg == "-h" || arg == "--help") {
             print_help();
             return 0;
         }
-        
+
         if (arg == "-v" || arg == "--verbose") {
             verbose = true;
             continue;
         }
-        
+
         if (arg == "-p" || arg == "--port") {
             if (i + 1 < argc) {
                 port = std::stoi(argv[++i]);
             } else {
                 std::cerr << "Error: Missing port number" << std::endl;
+                return 1;
+            }
+        }
+
+        if (arg == "-d" || arg == "--flows-dir") {
+            if (i + 1 < argc) {
+                flows_dir = argv[++i];
+            } else {
+                std::cerr << "Error: Missing flows directory" << std::endl;
+                return 1;
+            }
+        }
+
+        if (arg == "-w" || arg == "--web-dir") {
+            if (i + 1 < argc) {
+                web_dir = argv[++i];
+            } else {
+                std::cerr << "Error: Missing web directory" << std::endl;
                 return 1;
             }
         }
@@ -94,12 +126,49 @@ int main(int argc, char* argv[]) {
     // 创建服务器
     g_server = std::make_shared<WebServer>();
 
-    // 设置静态文件目录（Web编辑器前端）
-    // 从构建目录 build/bin/Release 出发，需要 ../../../ovf-web-editor
-    String static_dir = "../../../ovf-web-editor";
+    // 设置静态文件目录（Web编辑器前端）。
+    // 原先写死 "../../../ovf-web-editor"，那是从 Windows 的 build/bin/Release
+    // 数的层级；Linux 下二进制在 build/bin，多退了一层，实际指向
+    // <仓库上级>/ovf-web-editor —— 目录不存在，前端整站 404。
+    // 改成按候选列表探测，从哪个目录启动都能找到；也可以用 -w 显式指定。
+    String static_dir = web_dir;
+    if (static_dir.empty()) {
+        const char* candidates[] = {
+            "ovf-web-editor",            // 仓库根目录下启动
+            "../ovf-web-editor",         // build/ 下启动
+            "../../ovf-web-editor",      // build/bin/ 下启动（标准）
+            "../../../ovf-web-editor",   // build/bin/Release/ 下启动
+            "../../../../ovf-web-editor"
+        };
+        for (const char* c : candidates) {
+            if (std::filesystem::is_directory(c)) {
+                static_dir = c;
+                break;
+            }
+        }
+        if (static_dir.empty()) static_dir = "../../ovf-web-editor";
+    }
     g_server->set_static_dir(static_dir);
-    OVF_INFO() << "Static files served from: " << static_dir;
-    
+    if (std::filesystem::is_directory(static_dir)) {
+        OVF_INFO() << "Static files served from: "
+                   << std::filesystem::absolute(static_dir).string();
+    } else {
+        OVF_WARN() << "Static dir not found: " << static_dir
+                   << " (use -w to point at ovf-web-editor)";
+    }
+
+    // 流程文件存储目录（/api/files/save 与 /api/files/load 用）。
+    // 目录不存在就建一个 —— 否则第一次保存流程会写失败。
+    std::error_code ec;
+    std::filesystem::create_directories(flows_dir, ec);
+    if (ec) {
+        OVF_ERROR() << "Failed to create flows dir '" << flows_dir << "': " << ec.message();
+    } else {
+        g_server->set_storage_dir(flows_dir);
+        OVF_INFO() << "Flow files stored in: "
+                   << std::filesystem::absolute(flows_dir).string();
+    }
+
     // 注册信号处理
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
