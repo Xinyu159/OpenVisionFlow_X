@@ -87,9 +87,10 @@ git push origin v0.2-hardened
 
 ## 三、写一个新算子
 
-> ⚠️ 这套流程依赖阶段 4/7 建好的 `ovf-nodes/` 模块和 `new_node.sh`，**目前还没建**。
-> 在那之前，新算子先参照 `ovf-algorithm/src/geometry.cpp` 里 `RotateNode` 的写法，
-> 放在自己新建的目录里，不要改 `ovf-algorithm/`（见下方约束）。
+> ✅ `ovf-nodes/` 模块已建好（阶段 4），新算子写在那里。
+> `new_node.sh` 脚手架还没建（阶段 7）—— 在那之前先手写，参照
+> `ovf-algorithm/src/geometry.cpp` 里 `RotateNode` 的写法。
+> **新算子一律落在 `ovf-nodes/`，不要往 `ovf-algorithm/` 里加**（见下方约束 3）。
 
 ```bash
 git checkout main && git pull
@@ -215,8 +216,10 @@ cmake --build build -j16
 # 2. 测试（注意是 build/tests，直接 --test-dir build 会报 "No tests were found"）
 LD_LIBRARY_PATH=build/lib ctest --test-dir build/tests --output-on-failure
 
-# 3. 没动上游
-git diff baseline-501 --stat -- ovf-algorithm     # 必须为空
+# 3. 动没动算法数值（判据见约束 3）
+git diff baseline-501 --stat -- ovf-algorithm
+./build/bin/ovf-node-audit --full --json-out build/reports/node_audit.json
+#    然后与 build/reports/baseline/stage5_audit.json 逐算子对拍
 
 # 4. 注册表摘要（冲突数非 0 就要查）
 ./build/bin/ovf-web-server -p 18090 &             # 启动日志里有 NodeFactory 那一行
@@ -234,13 +237,34 @@ git diff baseline-501 --stat -- ovf-algorithm     # 必须为空
 ## 六、硬约束（别越界）
 
 1. **501 个老算子继续能编过、能跑** —— 611 处 `get_input(`、1511 处 `get_param(` 一个都不动，新增 API 只能「只加不改」
-2. **老算子的算法数值不许变**
-3. **`ovf-algorithm/` 不改** —— 对上游保持零 diff；新算子落在 `ovf-nodes/`
+2. **老算子的算法数值不许变**（例外只有阶段 6 逐条拍板过的那些）
+3. **`ovf-algorithm/` 只修缺陷、不加算子** —— 新算子一律落在 `ovf-nodes/`
+
+   > ★ **2026-09-15 用户拍板：判据从「对上游零 diff」改为「算法数值不变」。**
+   > 原因：阶段 5 体检查出的越界写、除零、悬垂引用、整数溢出**全都在 `ovf-algorithm/` 里**，
+   > 而原「零 diff」约束与本条自相矛盾 —— 照字面执行等于「知道会崩但一个字节都不许修」。
+   > 修法限定为**机械的、不影响正常输入的改动**；每修一个用体检报告对拍，
+   > 证明只有预期的那几个算子结论变了（`build/reports/baseline/` 存着修前基线）。
+   > 代价如实记：以后 `git fetch upstream` 拉更新时，被改过的文件会有冲突。
 4. **不摘任何算子** —— 体检结论只做运行时标注，501 个全部保持注册、可调用
 
 ---
 
-## 七、已知的真缺陷（阶段 1 体检查出来的，还没修）
+## 七、体检结果与已知缺陷（阶段 5 跑出来的）
+
+对 **502 个算子**（501 上游 + `nodes.Threshold`）跑 `ovf-node-audit --full`：
+
+```
+A  313   全过
+B   11   能跑通，元数据有 Error 级问题   ← 就是下面这三条
+C  112   不崩，但金丝雀跑不通 / 输出缺失 / 吃内存
+D   66   崩溃或挂死                      ← 202 个死亡点
+```
+
+**没有摘掉任何一个算子**（硬约束 4）：502 个全部照常注册、可调用，
+只是 `/api/nodes` 每个节点多了一个 `health` 字段，画布上可以把 D 档灰掉。
+
+### 三条元数据真缺陷（阶段 1 校验器查出，23 error）
 
 | 规则 | 数量 | 位置 | 问题 |
 |---|---|---|---|
@@ -248,5 +272,31 @@ git diff baseline-501 --stat -- ovf-algorithm     # 必须为空
 | V9 | 1 | `ovf-algorithm/src/barcode.cpp:3281` | `BarcodeGrade` 参数 id `standard` 重复。`params_` 是 map，两个默认值里有一个**静默丢失** |
 | V14 | 8 | `pcl_3d_reconstruction.cpp`、`ocr.cpp:466`、`3d_advanced.cpp:2096` 等 | 参数声明 `type=Number` 却带字符串 `options`，前端画不出控件（前端不会把 Number+options 渲染成下拉框 —— 转了会把存的整数下标悄悄换成字符串） |
 
-全部 501 个算子的体检结论：**501 registered / 0 type_id 冲突 / 512 条元数据问题（23 error + 489 note）**。
-修不修见任务「阶段 6」。
+### 崩溃面（66 个 D 档里最值得先看的）
+
+| # | 位置 | 问题 | 状态 |
+|---|---|---|---|
+| F1 | `color_processing.cpp` ×6、`dl_training.cpp` ×8 | `const ImageData& x = get_input(...).as_image();` —— 对**临时对象**取引用，语句一结束就悬垂 | ✅ 已修 |
+| F2 | `geometry.cpp:222` | `dst_w*dst_h*channels` 在 `int` 下溢出 → 堆越界写 | ⬜ |
+| F2b | `image_utils.cpp:259-260` | `(src_w-1)/(dst_w-1)` 在目标边长 == 1 时除零 → `NaN` → `(int)NaN = INT_MIN` → 越界。**共享工具**，`resize_bilinear` 的所有调用方都有份；且 `dst_w=1` 必崩、`dst_h=1` 静默算垃圾 | ⬜ |
+| F2c | `dl_training.cpp:1357-1361` | `crop_w = (int)(width * crop_ratio)`，`crop_ratio=1e9` 时 `int` 溢出 → `apply_crop` 里全是 UB → SIGSEGV。**修 F1 之后才暴露**（之前这个算子每次都 `bad_alloc`，根本跑不到） | ⬜ |
+| F3 | `dl_training.cpp:302,3422` | 未判 `ch>=3`，Mono8 下 2 字节堆溢出 | ⬜ 已拍板 |
+| F4 | `3d_matching.cpp:612,809` | 空 vector 上 `size()-1` → `SIZE_MAX` → 立刻越界 | ✅ 已修 |
+| F5 | `morphology.cpp:709` | `create_kernel` 的返回值被丢弃，空核照用 | ⬜ |
+| F6 | `automotive_inspection.cpp:1883` 等 4 处 | `sampling_interval=0` 死循环、`measure_length` 溢出写坏堆 | ⬜ |
+| F27 | `dl_training.cpp:2027` | `mixed_annotation` 端口声明了却**条件产出**。修 F1 前它在 S5 就断了、S6 从没执行过，所以阶段 5 给的是**假 A 档** | ⬜ 待拍板 |
+
+**F1 的坑**：原计划写的是「12 处」，实际是 **14 处** —— 计划里那份扫描的正则用
+`[a-z_]*` 匹配变量名，**匹配不到带数字的 `image1`/`image2`**（`MixupNode::execute`）。
+重写扫描器后拿 `baseline-501` 的源码验证过它**不是空转**（确实报 14 处），才动手改。
+
+**F2c / F27 是体检自己抓出来的**，不在阶段 5 的原清单里 —— 它们被 F1 挡在后面，
+F1 一修就露出来了。这正是「用体检报告当裁判」的价值。
+
+**这些在阶段 6 逐条修**（2026-09-15 用户已拍板：允许改 `ovf-algorithm/` 修缺陷，
+判据是「算法数值不变」而不是「零 diff」）。修前基线存在
+`build/reports/baseline/stage5_audit.json`，对拍用
+`python3 tools/node_audit/compare_reports.py`。
+
+**读报告的注意事项**：一个算子在 S5 就死掉的话，**它在 S6 上的分不可信**
+（S6 排在最后，根本轮不到执行）。`note` 里的「跑了 N/M 步」就是看这个的。
