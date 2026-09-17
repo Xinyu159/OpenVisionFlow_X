@@ -342,7 +342,9 @@ Result<void> ImageAnnotateNode::execute(FlowContext& context) {
         return validate_result;
     }
     
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -932,7 +934,9 @@ Result<void> LabelVerifyNode::execute(FlowContext& context) {
     // 获取参考图像尺寸
     uint32_t img_width = 0, img_height = 0;
     if (has_input("reference_image")) {
-        const ImageData& ref_image = get_input("reference_image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+        auto ref_data = get_input("reference_image");
+        const ImageData& ref_image = ref_data.as_image();
         img_width = ref_image.width;
         img_height = ref_image.height;
     }
@@ -1277,7 +1281,9 @@ Result<void> DataAugmentNode::execute(FlowContext& context) {
         return validate_result;
     }
     
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -1469,7 +1475,9 @@ Result<void> RandomCropNode::execute(FlowContext& context) {
         return validate_result;
     }
     
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -1721,7 +1729,9 @@ Result<void> ColorAugmentNode::execute(FlowContext& context) {
         return validate_result;
     }
     
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -1944,8 +1954,11 @@ Result<void> MixupNode::execute(FlowContext& context) {
         return validate_result;
     }
     
-    const ImageData& image1 = get_input("image1").as_image();
-    const ImageData& image2 = get_input("image2").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto image1_data = get_input("image1");
+    auto image2_data = get_input("image2");
+    const ImageData& image1 = image1_data.as_image();
+    const ImageData& image2 = image2_data.as_image();
     
     if (image1.empty() || image2.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input images are empty");
@@ -3474,7 +3487,9 @@ Result<void> DataLabelingNode::execute(FlowContext& context) {
         return validate_result;
     }
     
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }

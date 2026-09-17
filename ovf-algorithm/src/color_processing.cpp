@@ -1044,7 +1044,9 @@ Result<void> ColorConvertNode::execute(FlowContext& context) {
     }
     
     // 获取输入图像
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -1119,7 +1121,9 @@ Result<void> ColorSegmentNode::execute(FlowContext& context) {
     }
     
     // 获取输入图像
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -1259,7 +1263,9 @@ Result<void> ColorRecognizeNode::execute(FlowContext& context) {
     }
     
     // 获取输入图像
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -1374,7 +1380,9 @@ Result<void> ColorMatchNode::execute(FlowContext& context) {
     }
     
     // 获取输入图像
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
@@ -1489,7 +1497,9 @@ Result<void> ColorCorrectNode::execute(FlowContext& context) {
     }
     
     // 获取输入图像
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty() || input.channels < 3) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty or not RGB");
     }
@@ -1575,7 +1585,9 @@ Result<void> ColorHistogramNode::execute(FlowContext& context) {
     }
     
     // 获取输入图像
-    const ImageData& input = get_input("image").as_image();
+    // get_input() 按值返回 Data：先落局部变量，否则 as_image() 的引用在这条语句后就悬垂。
+    auto input_data = get_input("image");
+    const ImageData& input = input_data.as_image();
     if (input.empty()) {
         return Result<void>::failure(ErrorCode::InvalidImage, "Input image is empty");
     }
