@@ -61,6 +61,7 @@ void print_usage() {
         "输出:\n"
         "  --reports-dir DIR     报告目录，默认 build/reports\n"
         "  --update-annotations  顺带写 health/node_health.json（进仓库的那份）\n"
+        "                        ★ 不加这个选项体检是只读的，绝不改仓库文件\n"
         "  --json-out PATH       覆盖 JSON 报告路径\n"
         "  --md-out PATH         覆盖 Markdown 报告路径\n"
         "  --health-out PATH     覆盖标注表路径（隐含 --update-annotations）\n"
@@ -115,8 +116,8 @@ int main(int argc, char** argv) {
         else if (a == "--reports-dir")     opts.reports_dir = next("--reports-dir");
         else if (a == "--json-out")        opts.json_out = next("--json-out");
         else if (a == "--md-out")          opts.md_out = next("--md-out");
-        else if (a == "--health-out")    { opts.health_out = next("--health-out"); }
-        else if (a == "--update-annotations") opts.health_out = "";   // 用默认路径，下面填
+        else if (a == "--health-out")    { opts.health_out = next("--health-out"); opts.update_health = true; }
+        else if (a == "--update-annotations") opts.update_health = true;   // 路径用默认，下面填
         else if (a == "--fail-on-d")       opts.fail_on_d = true;
         else if (a == "--verbose")         opts.verbose = true;
         else if (a == "--list")            list_only = true;
@@ -145,7 +146,7 @@ int main(int argc, char** argv) {
 
     if (opts.json_out.empty())   opts.json_out = opts.reports_dir + "/node_audit.json";
     if (opts.md_out.empty())     opts.md_out   = opts.reports_dir + "/node_audit.md";
-    if (opts.health_out.empty()) {
+    if (opts.update_health && opts.health_out.empty()) {
 #ifdef OVF_SOURCE_DIR
         opts.health_out = String(OVF_SOURCE_DIR) + "/health/node_health.json";
 #else
@@ -257,7 +258,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "警告: 写不了 %s\n", opts.md_out.c_str());
     }
 
-    if (!opts.health_out.empty()) {
+    // 标注表**只在明确要求时**才写（--update-annotations / --health-out）。
+    // 以前这里是无条件写的，于是"跑一趟体检看看"就会顺手改掉仓库里那份
+    // health/node_health.json —— 而这份表是画布上灰不灰掉一个节点的依据。
+    // 更糟的是 7 个算子的档位本身在抖，随便跑一趟可能把一个会挂死的节点
+    // 写成 A 档。要刷新标注请显式加 --update-annotations。
+    if (opts.update_health) {
         // 标注表的目录可能还不存在（health/ 在仓库根）
         const size_t slash = opts.health_out.find_last_of('/');
         if (slash != String::npos) mkdirs(opts.health_out.substr(0, slash));
@@ -266,6 +272,9 @@ int main(int argc, char** argv) {
         } else {
             std::fprintf(stderr, "标注表已更新: %s\n", opts.health_out.c_str());
         }
+    } else {
+        std::fprintf(stderr,
+            "（标注表未动。要刷新 health/node_health.json 请加 --update-annotations）\n");
     }
 
     // ---------- 收尾汇总 ----------

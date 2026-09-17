@@ -207,7 +207,11 @@ struct Options {
     String skip_prefix;         //!< 跳过这些前缀
 
     String reports_dir = "build/reports";
-    String health_out;          //!< 非空 → 同时写一份 health/node_health.json
+    //! ★ 只有明确要求（--update-annotations / --health-out）才写标注表。
+    //! 体检本身是**只读**的 —— 以前它无条件重写 health/node_health.json，
+    //! 于是"跑一趟看看"就会把一个会挂死的节点按当次的运气写成 A 档。
+    bool   update_health = false;
+    String health_out;          //!< 标注表路径，仅当 update_health 为真时使用
     String json_out;            //!< 空则默认 reports_dir/node_audit.json
     String md_out;              //!< 空则默认 reports_dir/node_audit.md
     String source_dir;          //!< ovf-algorithm/src，用于"可中断性"统计
