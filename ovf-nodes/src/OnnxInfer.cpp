@@ -373,15 +373,20 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
     }
     set_output("region", Data(best));
 
-    // debug：白框画到灰度展开图上（8 像素十字角标风格，够看）
+    // debug：彩色底图 + 白框（RGB8，保留原图色彩）
     ImageData dbg;
     dbg.width = src.width; dbg.height = src.height;
-    dbg.channels = 1; dbg.format = ImageFormat::Mono8;
-    dbg.data.assign((size_t)W * H, 0);
+    dbg.channels = 3; dbg.format = ImageFormat::RGB8;
+    dbg.data.assign((size_t)W * H * 3, 0);
     for (size_t i = 0; i < (size_t)W * H; ++i) {
-        unsigned v = 0;
-        for (int c = 0; c < ch && c < 3; ++c) v += src.data[i * ch + c];
-        dbg.data[i] = (unsigned char)(ch >= 3 ? v / 3 : v);
+        if (ch >= 3) {
+            dbg.data[i * 3 + 0] = src.data[i * ch + 0];
+            dbg.data[i * 3 + 1] = src.data[i * ch + 1];
+            dbg.data[i * 3 + 2] = src.data[i * ch + 2];
+        } else {
+            const unsigned char v = src.data[i];
+            dbg.data[i * 3 + 0] = dbg.data[i * 3 + 1] = dbg.data[i * 3 + 2] = v;
+        }
     }
     for (const auto& k : keep) {
         // double 域夹紧后再取整 —— int 域夹不住 NaN(int 转换=INT_MIN)
@@ -390,12 +395,16 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
         const int y1 = (int)std::max(0.0, std::min((double)(H - 1), (double)k.y1));
         const int y2 = (int)std::max(0.0, std::min((double)(H - 1), (double)k.y2));
         for (int x = x1; x <= x2; ++x) {
-            dbg.data[(size_t)y1 * W + x] = 255;
-            dbg.data[(size_t)y2 * W + x] = 255;
+            for (int c = 0; c < 3; ++c) {
+                dbg.data[((size_t)y1 * W + x) * 3 + c] = 255;
+                dbg.data[((size_t)y2 * W + x) * 3 + c] = 255;
+            }
         }
         for (int y = y1; y <= y2; ++y) {
-            dbg.data[(size_t)y * W + x1] = 255;
-            dbg.data[(size_t)y * W + x2] = 255;
+            for (int c = 0; c < 3; ++c) {
+                dbg.data[((size_t)y * W + x1) * 3 + c] = 255;
+                dbg.data[((size_t)y * W + x2) * 3 + c] = 255;
+            }
         }
     }
     set_output("debug", Data(std::move(dbg)));

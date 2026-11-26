@@ -273,10 +273,13 @@ static void UploadImage(const ImageData& img) {
         std::vector<unsigned char> rgba((size_t)W * H * 4, 255);
         const uint32_t ch = img.channels ? img.channels : 1;
         for (size_t i = 0; i < (size_t)W * H; ++i) {
-            unsigned v = 0;
-            for (uint32_t c = 0; c < ch && c < 3; ++c) v += img.data[i * ch + c];
-            v = ch >= 3 ? v / 3 : v;
-            rgba[i * 4 + 0] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = (unsigned char)v;
+            if (ch >= 3) {   // 彩色直出
+                rgba[i * 4 + 0] = img.data[i * ch + 0];
+                rgba[i * 4 + 1] = img.data[i * ch + 1];
+                rgba[i * 4 + 2] = img.data[i * ch + 2];
+            } else {         // 灰度
+                rgba[i * 4 + 0] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = img.data[i * ch];
+            }
         }
         D3D11_TEXTURE2D_DESC td{};
         td.Width = W; td.Height = H; td.MipLevels = 1; td.ArraySize = 1;
@@ -390,12 +393,28 @@ static void PanelParams() {
             bool b = st.node->get_param(p.id, p.default_value).as_bool();
             if (ImGui::Checkbox(p.name.c_str(), &b)) st.node->set_param(p.id, Data(b));
         } else if (p.type == DataType::String) {
-            char buf[256];
+            char buf[512];
             strncpy(buf, st.node->get_param(p.id, p.default_value).as_string().c_str(),
                     sizeof(buf) - 1);
             buf[sizeof(buf) - 1] = 0;
             if (ImGui::InputText(p.name.c_str(), buf, sizeof(buf)))
                 st.node->set_param(p.id, Data(String(buf)));
+            if (p.id.find("path") != String::npos) {   // 路径参数给个浏览按钮
+                ImGui::SameLine();
+                if (ImGui::Button("...")) {
+                    wchar_t file[MAX_PATH] = L"";
+                    OPENFILENAMEW ofn{};
+                    ofn.lStructSize = sizeof(ofn);
+                    ofn.lpstrFilter = L"模型 (*.onnx) *.onnx 所有文件 *.* ";
+                    ofn.lpstrFile = file; ofn.nMaxFile = MAX_PATH;
+                    ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+                    if (GetOpenFileNameW(&ofn)) {
+                        char path[512];
+                        wcstombs(path, file, sizeof(path));
+                        st.node->set_param(p.id, Data(String(path)));
+                    }
+                }
+            }
         }
         ImGui::PopID();
     }

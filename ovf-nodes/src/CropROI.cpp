@@ -38,7 +38,7 @@ NodeInfo CropROINode::make_info() {
     info.params.push_back(ParamDef("y", "左上 y", DataType::Number, Data(0.0)));
     info.params.push_back(ParamDef("w", "宽", DataType::Number, Data(0.0)).range(0, 65535));
     info.params.push_back(ParamDef("h", "高", DataType::Number, Data(0.0)).range(0, 65535));
-    info.params.push_back(ParamDef("expand", "外扩像素", DataType::Number, Data(0.0)).range(0, 1024));
+    info.params.push_back(ParamDef("expand", "外扩(四周各扩N像素)", DataType::Number, Data(0.0)).range(0, 1024));
     return info;
 }
 
