@@ -16,11 +16,13 @@
 
 #include <cstdio>
 #include <string>
+#define TRACE(...) do{ fprintf(stderr,"[T] " __VA_ARGS__); fflush(stderr);}while(0)
 
 using namespace ovf;
 
 int main(int argc, char** argv) {
     if (argc < 2) { std::printf("usage: ovf-run <image> [operator_id]\n"); return 2; }
+    TRACE("start %s\n", argv[1]);
     const char* op = argc >= 3 ? argv[2] : "nodes.LightbarDetect";
 
     int w = 0, h = 0, n = 0;
@@ -37,6 +39,7 @@ int main(int argc, char** argv) {
         for (int c = 0; c < ch && c < 3; ++c) v += px[i * ch + c];
         img.data[i] = (unsigned char)(ch >= 3 ? v / 3 : v);
     }
+    TRACE("decoded %dx%dx%d\n", w, h, n);
     stbi_image_free(px);
 
     try { ovf::nodes::initialize_user_nodes(); }
@@ -50,18 +53,26 @@ int main(int argc, char** argv) {
     for (const auto& in : node->info().inputs)
         if (in.data_type == DataType::Image) { node->set_input(in.id, Data(img)); break; }
 
+    TRACE("executing op %s\n", op);
     FlowContext ctx;
     auto r = node->execute(ctx);
+    TRACE("exec done ok=%d\n", (int)r.is_success());
     if (!r.is_success()) { std::printf("[FAIL] %s\n", r.message().c_str()); return 1; }
 
+    TRACE("A: get count\n");
     const double count = node->get_output("count").as_number(-1);
+    TRACE("B: count=%f get region\n", count);
     const Region rg = node->get_output("region").as_region();
+    TRACE("C: region got\n");
     std::printf("%s\tcount=%.0f\tregion=(%d,%d,%dx%d,%.1frad)\n",
                 argv[1], count, rg.x, rg.y, rg.width, rg.height, rg.angle);
 
-    const ImageData& dbg = node->get_output("debug").as_image();
+    // 按值拷贝：get_output 返回临时 Data，as_image() 的引用经函数返回值
+    // 绑定不延长临时生命周期 —— 悬垂引用 use-after-free（大图必炸的根因）
+    const ImageData dbg = node->get_output("debug").as_image();
     if (!dbg.data.empty() && dbg.width) {
         stbi_write_bmp("debug.bmp", (int)dbg.width, (int)dbg.height, 1, dbg.data.data());
+    TRACE("debug.bmp written\n");
     }
     return 0;
 }
