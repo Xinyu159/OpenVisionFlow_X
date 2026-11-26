@@ -97,6 +97,9 @@ endif()
 add_subdirectory(ovf-sdk)
 add_subdirectory(ovf-web-server)
 
+# 桌面工作台（对标 HDevelop 的原生界面，替代浏览器编辑器）
+add_subdirectory(ovf-studio)
+
 # 测试模块（纯C++测试框架，无外部依赖）
 if(BUILD_TESTS)
     add_subdirectory(tests)

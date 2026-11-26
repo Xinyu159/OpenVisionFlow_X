@@ -121,18 +121,27 @@ TEST(UserNodes, ModuleIsRegisteredAsStrict) {
 TEST(UserNodes, DeclaredMatchesRegistered) {
     const UserNodeReport report = check_user_nodes();
 
+    // 算子会一个个长进来，这里不断言总数，只断言"声明=注册、零缺失零劫持"，
+    // 以及每个已知算子都在清单和注册表里。
     ASSERT_TRUE(report.ok());
-    ASSERT_EQ(1u, report.declared.size());
-    ASSERT_EQ(String("nodes.Threshold"), report.declared[0]);
-    ASSERT_EQ(1u, report.registered.size());
+    ASSERT_TRUE(report.declared.size() >= 1u);
+    ASSERT_EQ(report.declared.size(), report.registered.size());
     ASSERT_EQ(0u, report.missing.size());
     ASSERT_EQ(0u, report.hijacked.size());
 
+    const char* known[] = {"nodes.Threshold", "nodes.LightbarDetect"};
     // 真清单和注册表里的出处标签要对得上
     const Vector<String> tagged = tagged_type_ids();
     bool found = false;
     for (const auto& t : tagged) {
         if (t == "nodes.Threshold") found = true;
+    }
+    for (const char* k : known) {
+        bool in_declared = false, in_tagged = false;
+        for (const auto& t : report.declared) if (t == k) in_declared = true;
+        for (const auto& t : tagged)       if (t == k) in_tagged = true;
+        ASSERT_TRUE(in_declared);
+        ASSERT_TRUE(in_tagged);
     }
     ASSERT_TRUE(found);
 }
