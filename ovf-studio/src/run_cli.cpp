@@ -6,6 +6,9 @@
  * 默认 operator_id = nodes.LightbarDetect。输出：count / region + debug.bmp
  */
 #include "ovf/core/node.h"
+#include "ort_mingw_compat.h"
+#include <onnxruntime_c_api.h>
+#include <onnxruntime_cxx_api.h>
 #include "ovf/nodes/nodes.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -21,7 +24,20 @@
 using namespace ovf;
 
 int main(int argc, char** argv) {
+    // 诊断：进程内第一次 ORT 调用（若在此崩，说明与 ovf 静态库混合链接有关）
+    {
+        const OrtApiBase* base = OrtGetApiBase();
+        fprintf(stderr, "[ORT0] base=%p ver=%s\n", (void*)base,
+                base ? base->GetVersionString() : "null");
+        fflush(stderr);
+    }
     if (argc < 2) { std::printf("usage: ovf-run <image> [operator_id]\n"); return 2; }
+    // 预热：main 早期构造一次 SessionOptions（验证 C++ 包装内联静态初始化问题）
+    {
+        Ort::SessionOptions warm;
+        fprintf(stderr, "[WARM] constructed\n");
+        fflush(stderr);
+    }
     TRACE("start %s\n", argv[1]);
     const char* op = argc >= 3 ? argv[2] : "nodes.LightbarDetect";
 
@@ -44,6 +60,7 @@ int main(int argc, char** argv) {
 
     try { ovf::nodes::initialize_user_nodes(); }
     catch (const Exception& e) { std::printf("[ERR] %s\n", e.what()); return 1; }
+    fprintf(stderr, "[ORT1] after init: ver=%s\n", OrtGetApiBase()->GetVersionString()); fflush(stderr);
 
     auto& factory = NodeFactory::instance();
     if (!factory.has_type(op)) { std::printf("[ERR] unknown op %s\n", op); return 1; }
@@ -66,6 +83,7 @@ int main(int argc, char** argv) {
         if (in.data_type == DataType::Image) { node->set_input(in.id, Data(img)); break; }
 
     TRACE("executing op %s\n", op);
+    fprintf(stderr, "[ORT2] before execute: ver=%s\n", OrtGetApiBase()->GetVersionString()); fflush(stderr);
     FlowContext ctx;
     auto r = node->execute(ctx);
     TRACE("exec done ok=%d\n", (int)r.is_success());

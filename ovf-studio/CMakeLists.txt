@@ -56,5 +56,7 @@ target_include_directories(ovf-run PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-nodes/include
 )
 target_link_libraries(ovf-run PRIVATE ovf-core ovf-nodes-link)
+target_include_directories(ovf-run PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-nodes/thirdparty/onnxruntime/include)
 
 install(TARGETS ovf-studio RUNTIME DESTINATION bin)

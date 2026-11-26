@@ -28,16 +28,25 @@
 namespace ovf {
 namespace nodes {
 
+namespace {
+// Ort::Env 进程级单例（惰性）。
+// 教训：作为节点成员在 factory.create（节点构造期）里直接构造 Ort::Env 会段错误
+// （MinGW+静态库混合链接下，ORT 的 C++ 包装在构造期取 API 表的路径不稳）；
+// 惰性到第一次 execute 再建，且全进程共享一个。
+Ort::Env& SharedOrtEnv() {
+    static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "ovf.onnx");
+    return env;
+}
+} // namespace
+
 class OnnxInferNode : public INode {
 public:
-    OnnxInferNode(const String& instance_id)
-        : INode(instance_id, make_info()), env_(ORT_LOGGING_LEVEL_WARNING, "ovf.onnx") {}
+    OnnxInferNode(const String& instance_id) : INode(instance_id, make_info()) {}
 
     static NodeInfo make_info();
     Result<void> execute(FlowContext& context) override;
 
 private:
-    Ort::Env env_;
     std::shared_ptr<Ort::Session> session_;   // 模型缓存：同节点实例只加载一次
     String loaded_path_;
 };
@@ -108,6 +117,7 @@ float Iou(const DetBox& a, const DetBox& b) {
 } // namespace
 
 Result<void> OnnxInferNode::execute(FlowContext& context) {
+    fprintf(stderr, "[S0] enter execute\n");
     // ---- 输入与参数（安全带 API）----
     OVF_TRY_IN(image, in_image("image"));
     OVF_TRY_IN(path_r, p_str("model_path"));
@@ -128,12 +138,13 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
     const int ch = src.channels ? (int)src.channels : 1;
 
     // ---- 会话缓存：同一模型路径只加载一次 ----
+    fprintf(stderr, "[S1] params ok, model=%s\n", model_path.c_str());
     if (!session_ || loaded_path_ != model_path) {
         try {
             Ort::SessionOptions so;
             so.SetIntraOpNumThreads(1);   // MinGW 下 ORT 默认线程池崩，单线程稳
             std::wstring wpath(model_path.begin(), model_path.end());
-            session_ = std::make_shared<Ort::Session>(env_, wpath.c_str(), so);
+            session_ = std::make_shared<Ort::Session>(SharedOrtEnv(), wpath.c_str(), so);
             loaded_path_ = model_path;
         } catch (const Ort::Exception& e) {
             session_.reset();
@@ -166,24 +177,14 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
     }
 
     // ---- 推理 ----
-    std::vector<const char*> in_names;
-    std::vector<const char*> out_names;
-    {
-        Ort::AllocatorWithDefaultOptions alloc;
-        auto in = session_->GetInputNameAllocated(0, alloc);
-        auto out = session_->GetOutputNameAllocated(0, alloc);
-        in_names.push_back(in.get());
-        out_names.push_back(out.get());
-        // names 的生命周期：Get*Allocated 持有字符串，作用域内有效
-    }
-    // 注意：上面 unique_ptr 出作用域会释放名字字符串 —— 改为成员级缓存
+    fprintf(stderr, "[S2] preprocess done, session=%d\n", (int)(session_ != nullptr));
+    fprintf(stderr, "[P1] before names\n");
     // 为避免悬挂，这里重新获取并保持在 run 之前
     Ort::AllocatorWithDefaultOptions alloc;
     auto in_name  = session_->GetInputNameAllocated(0, alloc);
     auto out_name = session_->GetOutputNameAllocated(0, alloc);
     const char* in_names2[1]  = { in_name.get() };
     const char* out_names2[1] = { out_name.get() };
-    (void)in_names; (void)out_names;
 
     const int64_t dims[5] = {1, in_ch, S, S, 0};
     const int64_t* dims_ptr = dims;
@@ -203,8 +204,10 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
 
     std::vector<Ort::Value> outputs;
     try {
+        fprintf(stderr, "[P2] before run\n");
         outputs = session_->Run(Ort::RunOptions{nullptr}, in_names2, &input, 1,
                                 out_names2, 1);
+        fprintf(stderr, "[P3] after run\n");
     } catch (const Ort::Exception& e) {
         return fail_node(ErrorCode::Unknown,
                          String("onnx run failed: ") + e.what());
