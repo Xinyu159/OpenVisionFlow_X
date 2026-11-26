@@ -142,7 +142,10 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
     if (!session_ || loaded_path_ != model_path) {
         try {
             Ort::SessionOptions so;
-            so.SetIntraOpNumThreads(1);   // MinGW 下 ORT 默认线程池崩，单线程稳
+            so.SetIntraOpNumThreads(1);
+            // MinGW 混合链接排查：彻底关会话级线程池 + 禁图优化（分段定位 AV）
+            so.AddConfigEntry("session.disable_per_session_threads", "1");
+            so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
             std::wstring wpath(model_path.begin(), model_path.end());
             session_ = std::make_shared<Ort::Session>(SharedOrtEnv(), wpath.c_str(), so);
             loaded_path_ = model_path;
@@ -188,7 +191,7 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
 
     const int64_t dims[5] = {1, in_ch, S, S, 0};
     const int64_t* dims_ptr = dims;
-    Ort::MemoryInfo mi = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    Ort::MemoryInfo mi = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
     // fp16 模型（如深大 RP24 的 0526.onnx）：转半精度再喂
     const auto in_type = session_->GetInputTypeInfo(0)
                              .GetTensorTypeAndShapeInfo().GetElementType();
@@ -272,6 +275,10 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
         const float h  = out[channels_first ? 3 * (int64_t)N + n : cx_i + 3];
         DetBox b{ (cx - w / 2) * W / S, (cy - h / 2) * H / S,
                   (cx + w / 2) * W / S, (cy + h / 2) * H / S, score, best_c };
+        // NaN/Inf 拦截：NaN 与任何数比较都是 false，<= 检查拦不住；
+        // 放进画框循环会把 (int)NaN=INT_MIN 变成天文数字索引 → 越界写 → 堆损坏
+        if (!std::isfinite(b.x1) || !std::isfinite(b.y1) ||
+            !std::isfinite(b.x2) || !std::isfinite(b.y2)) continue;
         if (b.x2 <= b.x1 || b.y2 <= b.y1) continue;
         boxes.push_back(b);
     }
@@ -321,13 +328,18 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
         dbg.data[i] = (unsigned char)(ch >= 3 ? v / 3 : v);
     }
     for (const auto& k : keep) {
-        for (int x = std::max(0, (int)k.x1); x <= std::min(W - 1, (int)k.x2); ++x) {
-            dbg.data[(size_t)std::max(0, (int)k.y1) * W + x] = 255;
-            dbg.data[(size_t)std::min(H - 1, (int)k.y2) * W + x] = 255;
+        // double 域夹紧后再取整 —— int 域夹不住 NaN(int 转换=INT_MIN)
+        const int x1 = (int)std::max(0.0, std::min((double)(W - 1), (double)k.x1));
+        const int x2 = (int)std::max(0.0, std::min((double)(W - 1), (double)k.x2));
+        const int y1 = (int)std::max(0.0, std::min((double)(H - 1), (double)k.y1));
+        const int y2 = (int)std::max(0.0, std::min((double)(H - 1), (double)k.y2));
+        for (int x = x1; x <= x2; ++x) {
+            dbg.data[(size_t)y1 * W + x] = 255;
+            dbg.data[(size_t)y2 * W + x] = 255;
         }
-        for (int y = std::max(0, (int)k.y1); y <= std::min(H - 1, (int)k.y2); ++y) {
-            dbg.data[(size_t)y * W + std::max(0, (int)k.x1)] = 255;
-            dbg.data[(size_t)y * W + std::min(W - 1, (int)k.x2)] = 255;
+        for (int y = y1; y <= y2; ++y) {
+            dbg.data[(size_t)y * W + x1] = 255;
+            dbg.data[(size_t)y * W + x2] = 255;
         }
     }
     set_output("debug", Data(std::move(dbg)));
