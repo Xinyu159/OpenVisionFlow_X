@@ -1,250 +1,79 @@
-# OpenVisionFlow - 开源工业机器视觉平台
+# OpenVisionFlow_X — Windows 优先的自建算子平台
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Version](https://img.shields.io/badge/Version-0.2.0-green.svg)](CHANGELOG.md)
-[![Nodes](https://img.shields.io/badge/Nodes-501-orange.svg)](docs/node_reference.md)
-[![Tests](https://img.shields.io/badge/Tests-100%25-brightgreen.svg)](docs/test_report_after_fix.md)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-5%2F5%20passed-brightgreen.svg)]()
 
-## 项目简介
+## 这个仓库现在是什么
 
-OpenVisionFlow (OVF) 是一个完全开源、跨平台的工业机器视觉平台，对标 VisionMaster/Halcon/VisionPro，解决其算法弱、封闭、硬件绑定、授权受限等核心问题。
+以开源工业机器视觉平台 **[OpenVisionFlow](https://gitcode.com/hunyuan2026/OpenVisionFlow)（Apache-2.0，上游 15.4 万行 / 502 算子）** 的引擎为核心，**转向 Windows 产线部署环境**的自建算子平台。
 
-> ### 关于这个仓库
->
-> 这是 **[上游项目](https://gitcode.com/hunyuan2026/OpenVisionFlow)（Apache-2.0）的衍生版本**，不是从零自研。
-> 上游提供了整体架构与全部 501 个算子；本仓库在此之上做的是 **Linux 可移植性修复**，
-> 以及一套**算子开发加固**（注册逻辑、崩溃防护、算子体检流水线）。
-> 原项目的版权与许可见 [LICENSE](LICENSE)。上游更新走 `git fetch upstream`，
-> 详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
-
-## 核心特性
-
-- **完全开源免费** - Apache 2.0 协议，无加密狗、无授权限制
-- **501个算子节点** - 图像处理/亚像素精度/OCR/行业检测/CUDA加速
-- **硬件完全解耦** - 统一 HAL 抽象层，支持全品牌工业相机
-- **算法分层开放** - 底层可改、算子可插拔，源码可见
-- **跨平台支持** - Windows/Linux/国产操作系统
-- **双开发模式** - Web零代码编辑器 + SDK 代码开发
-- **工业鲁棒性** - 详细日志诊断、断点调试、自动补偿
-- **CUDA加速** - 5-10x关键算子性能提升
-- **亚像素精度** - ±0.005像素边缘定位精度
-
-## 📚 文档
-
-| 文档 | 描述 |
-|------|------|
-| [API参考文档](docs/api_reference.md) | 核心/算法/Python SDK/Web API完整参考 |
-| [用户手册](docs/user_manual.md) | Web编辑器、调试功能、Python SDK使用指南 |
-| [节点参考手册](docs/node_reference.md) | 501个算子节点详细说明 |
-| [Web编辑器示例](docs/web_editor_examples.md) | 5个完整图像处理流程示例 |
-| [架构设计文档](docs/architecture.md) | 系统架构、核心设计、扩展机制 |
-| [测试报告](docs/test_report_after_fix.md) | 107个单元测试，100%通过率 |
-| [依赖说明](docs/DEPENDENCIES.md) | 项目依赖及环境配置指南 |
-| [版本变更日志](CHANGELOG.md) | Keep a Changelog规范 |
-
-## 项目结构
+2026-11-26 `windows-rebuild` 重构后的形态：
 
 ```
-OpenVisionFlow/
-├── ovf-core/           # 微内核核心模块
-│   ├── include/ovf/core/   # INode/Data/Result/FlowEngine
-│   └── src/
-│
-├── ovf-algorithm/      # 算法模块（501节点）
-│   ├── include/ovf/algorithm/
-│   │   ├── subpixel_precision.h   # 亚像素精度
-│   │   ├── chinese_ocr.h          # 汉字OCR
-│   │   ├── wafer_inspection.h     # 半导体晶圆检测
-│   │   ├── automotive_inspection.h # 汽车零部件检测
-│   │   ├── cuda_accelerator.h     # CUDA加速
-│   │   └── ...
-│   └── src/
-│
-├── ovf-web-server/     # Web零代码编辑器
-│   ├── src/
-│   └── web/            # 前端界面
-│
-├── ovf-sdk-python/     # Python SDK
-│   └── src/
-│
-├── tests/              # 测试框架
-│   ├── test_framework.h
-│   ├── test_core_types.cpp
-│   ├── test_cuda_accelerator.cpp
-│   └── ...
-│
-├── docs/               # 文档目录
-│   ├── api_reference.md
-│   ├── user_manual.md
-│   ├── node_reference.md
-│   ├── web_editor_examples.md
-│   ├── architecture.md
-│   ├── DEPENDENCIES.md
-│   └── test_report_after_fix.md
-│
-├── CHANGELOG.md        # 版本变更日志
-└── README.md           # 本文件
+├── ovf-core/          引擎（继承上游 + 本人加固：注册防重名/流程引擎防崩/安全带 API）
+├── ovf-nodes/         ★ 自建算子模块（唯一算子来源，从 Threshold 起逐个填充）
+├── ovf-sdk/           C++ SDK
+├── ovf-web-server/    REST 服务 + Web 编辑器后端
+└── tests/             引擎/算子测试（ctest）
 ```
 
-## 突破成果
+**上游 502 个算子（ovf-algorithm）、Qt 编辑器、相机插件、Python SDK、算子体检工具已整体移除**——它们仍完整保留在 git 历史（`windows-rebuild` 分支之前的 `main`）与上游仓库中。移除不是否定，而是把平台变成"引擎 + 我自己写的算子"：每个算子都经过自己理解和验证，而不是背一座不认识的山。
 
-### P0 突破（核心差距缩小）
+> 上游衍生关系的完整记录（Linux 移植、注册加固、防崩、501 算子体检流水线等 ~9300 行工作）见 git 历史与 `docs/hardening/`。原项目版权与许可见 [LICENSE](LICENSE)。
 
-| 功能 | 详情 |
-|------|------|
-| **亚像素精度** | 10节点，Taylor/Parabola/Gaussian/Saddle/Zernike算法，±0.005像素精度 |
-| **汉字OCR** | 10节点，MSER文本检测+模板匹配，GB2312汉字3755个 |
-| **Web编辑器** | 8大功能模块，零代码流程配置，断点调试 |
+## Windows 构建状态（2026-11-26，实测通过）
 
-### P1 突破（行业应用）
-
-| 功能 | 详情 |
-|------|------|
-| **半导体晶圆检测** | 10节点，晶粒定位/缺陷分类/图案检测/厚度测量 |
-| **汽车零部件检测** | 10节点，钣金/焊缝/涂装/齿轮检测 |
-| **调试工具** | 断点管理/单步调试/变量监视/执行追踪 |
-| **执行日志可视化** | WebSocket实时推送/性能分析/Chart.js输出 |
-| **CUDA加速** | 8节点，高斯模糊/Sobel/阈值/形态学（5-10x加速） |
-
-## 构建依赖
-
-- CMake >= 3.16
-- C++17 编译器 (MSVC/GCC/Clang)
-- OpenCV >= 4.5 (可选)
-- CUDA >= 11.0 (可选，用于GPU加速)
-
-## 构建步骤
+工具链：**MinGW-w64 (w64devkit, gcc 14.2)** + CMake ≥ 3.24。
 
 ```bash
-# 克隆项目
-git clone https://gitcode.com/hunyuan2026/OpenVisionFlow.git
-cd OpenVisionFlow
-
-# 配置（启用测试）
-cmake -B build -DBUILD_TESTS=ON
-
-# 构建
-cmake --build build --config Release
-
-# 运行测试
-./build/bin/Release/test_all.exe
-
-# 启动Web服务器
-./build/bin/Release/ovf-web-server.exe
+cmake -G "MinGW Makefiles" -B build -S .
+cmake --build build -j8
+cd build && ctest --output-on-failure   # 5/5 passed
+./bin/Release/ovf-web-server.exe        # /api/nodes 已能返回 nodes.Threshold
 ```
+
+Windows 适配过程中修掉的真实问题（都会在面试里被问，值得记住）：
+
+| 问题 | 根因 | 修法 |
+|---|---|---|
+| `remove(iterator)` 编译错误 | Linux 上 `<algorithm>` 被传递包含，MinGW 没有；未限定名落到 C 的 `remove(const char*)` | 显式 `#include <algorithm>` |
+| 链接期 `undefined reference to vtable for ovf::INode` | `WINDOWS_EXPORT_ALL_SYMBOLS` 对 MinGW 无法导出虚函数 vtable | ovf-core 在 WIN32 下改静态库 |
+| `UserNodesTest` 段错误 | PE/COFF 没有 ELF 弱函数"解析不到即 nullptr"语义，MinGW 误入 `__GNUC__` 弱引用分支 | 弱引用分支排除 `_WIN32` |
+| 算子注册表为空（零警告） | 静态库只抽取被引用的目标文件，`OVF_REGISTER_NODE` 注册对象无人引用——Windows 静态库版的 `--as-needed` 问题 | `ovf-nodes-link` 用 `$<LINK_LIBRARY:WHOLE_ARCHIVE,ovf-nodes>`（MinGW→`--whole-archive`，MSVC→`/WHOLEARCHIVE`） |
+| ovf-nodes DLL 导入库与静态 core 重定义 | MinGW DLL 自动导出把 core 符号再导一遍 | ovf-nodes 在 WIN32 下也改静态 |
+
+MSVC（VS Build Tools）构建是下一步——上游 CMake 的 MSVC 分支（`/W4 /utf-8`、winsock 双路径）已就位，主要工作量在 154k→引擎子集的 `/W4` 告警清理。
+
+## 如何加一个自己的算子
+
+算子全部住在 `ovf-nodes/src/`（`file(GLOB CONFIGURE_DEPENDS)` 会自动拾取新文件）：
+
+1. 抄 `ovf-nodes/src/Threshold.cpp` 的骨架：继承 `INode`，`OVF_REGISTER_NODE` 静态注册；
+2. 用安全带 API 写 execute（`in_image() / p_num() / step_ok() / OVF_TRY_IN`）；
+3. 在 `ovf-nodes/tests/test_user_nodes.cpp` 加行为测试；
+4. `cmake --build build && cd build && ctest`。
+
+> Linux 上的历史经验（`--as-needed` 丢库、弱引用探测三层防御）写在 `ovf-nodes/CMakeLists.txt` 与 `docs/hardening/stage4_nodes.md`，Windows 对偶问题（whole-archive）的注释在 `ovf-nodes-link` 处。
 
 ## 快速开始
 
-### 使用 Python SDK
+```bash
+# 启动 Web 服务（编辑器画布 + REST API）
+./build/bin/Release/ovf-web-server.exe -p 8080
 
-```python
-import ovf
-
-# 初始化
-ovf.initialize()
-
-# 创建图像
-img = ovf.Image(640, 480, 1)
-
-# 加载流程
-flow = ovf.Flow.load("flow.json")
-
-# 设置输入
-flow.set_input("image", img)
-
-# 运行流程
-flow.run()
-
-# 获取结果
-result = flow.get_output("result")
-print(f"检测结果: {result}")
+# 节点清单
+curl http://127.0.0.1:8080/api/nodes
 ```
 
-### 使用 Web 编辑器
+C++ SDK 用法见 `ovf-sdk/`；上游的完整文档（501 算子参考、用户手册、架构）仍在 `docs/` 下，作为引擎与 Web 层的参考保留。
 
-1. 启动服务器: `./build/bin/Release/ovf-web-server.exe`
-2. 打开浏览器: `http://localhost:8080`
-3. 从节点库拖拽节点到画布（501个可用节点）
-4. 连接节点端口
-5. 配置参数
-6. 点击运行
+## 构建依赖
 
-**详细示例**: 参见 [Web编辑器使用指南](docs/web_editor_examples.md)
-
-### 使用 C++ SDK
-
-```cpp
-#include "ovf/api.h"
-
-int main() {
-    // 初始化 SDK
-    ovf::api::initialize();
-    
-    // 创建流程引擎
-    auto engine = ovf::api::create_flow_engine();
-    
-    // 加载流程文件
-    engine->load_from_file("flow.json");
-    
-    // 运行流程
-    ovf::FlowContext context;
-    auto result = engine->run(context);
-    
-    ovf::api::shutdown();
-    return 0;
-}
-```
-
-## 核心模块说明
-
-### ovf-core (微内核)
-
-- **INode** - 节点基类，所有算法节点的统一接口
-- **Data** - 数据容器，支持图像/数值/字符串/数组等
-- **Result<T>** - 结果封装，错误码+错误消息
-- **FlowEngine** - 流程引擎，流程加载/执行/管理
-- **NodeFactory** - 节点工厂，节点注册/创建
-
-### ovf-algorithm (算法模块)
-
-| 分类 | 节点数 | 代表节点 |
-|------|--------|----------|
-| 图像处理 | ~80 | GaussianBlur, SobelEdge, ImageResize |
-| 亚像素精度 | 10 | SubpixelEdge, SubpixelCorner, SubpixelCircle |
-| Blob分析 | ~20 | BlobDetect, BlobAnalyze, BlobFilter |
-| 测量工具 | ~30 | CaliperTool, MeasureLine, MeasureCircle |
-| OCR识别 | 10 | ChineseOCR, DigitOCR, EnglishOCR |
-| 半导体检测 | 10 | WaferDieDetection, WaferDefectClassification |
-| 汽车检测 | 10 | BodyPanelInspection, WeldSeamInspection |
-| CUDA加速 | 8 | CudaGaussianBlur, CudaSobelFilter |
-
-## 测试覆盖
-
-| 模块 | 测试数 | 通过率 |
-|------|--------|--------|
-| CoreTypes | 63 | **100%** |
-| FlowEngine | 44 | **100%** |
-| CudaAccelerator | 37 | **100%** |
-| Debugger | 73 | **100%** |
-| AutomotiveInspection | 55 | **100%** |
-| WaferInspection | 45 | **100%** |
-
-## 开发路线
-
-- [x] **V0.1** - 基础架构（核心内核 + HAL + 基础算法）
-- [x] **V0.2** - P0/P1突破（亚像素/OCR/行业检测/CUDA） ✅
-- [ ] **V0.5** - 功能完整版（3D + 深度学习推理 + 工业协议）
-- [ ] **V1.0** - 正式版（UI优化 + 自动补偿 + 信创适配）
+- CMake ≥ 3.24（`LINK_LIBRARY:WHOLE_ARCHIVE`）
+- C++17：MinGW-w64 gcc（已验证）/ MSVC（计划） / Linux gcc（历史验证）
+- 无其他强制依赖（OpenCV/Qt6/CUDA 均可选）
 
 ## 许可证
 
-Apache 2.0 License - 允许免费商用、二次修改、闭源分发
-
-## 联系方式
-
-- GitCode仓库: https://gitcode.com/hunyuan2026/OpenVisionFlow
-- Issues反馈: https://gitcode.com/hunyuan2026/OpenVisionFlow/issues
-
----
-
-**OpenVisionFlow** - 让工业机器视觉更开放、更强大、更自由！
+Apache-2.0（继承上游）。本仓库为衍生作品，上游版权与许可见 [LICENSE](LICENSE)。

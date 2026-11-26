@@ -72,6 +72,9 @@ message(STATUS "User operator module (ovf-nodes): ${BUILD_OVF_NODES}")
 # 测试模块（纯C++测试框架，无外部依赖）
 # 从下面挪到这儿：ovf-nodes/ 也要看它来决定建不建自己的测试。
 option(BUILD_TESTS "Build test suite" ON)
+# enable_testing 必须在顶层：只在 tests/ 里调的话，build 根目录的
+# CTestTestfile 不会生成，ctest 在根目录跑就是 "No tests were found"。
+enable_testing()
 
 # 全局定义
 add_compile_definitions(OVF_VERSION="${PROJECT_VERSION}")

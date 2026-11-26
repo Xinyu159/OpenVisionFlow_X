@@ -23,7 +23,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 file(GLOB_RECURSE NODES_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 file(GLOB_RECURSE NODES_HEADERS CONFIGURE_DEPENDS "include/*.h")
 
-add_library(ovf-nodes SHARED ${NODES_SOURCES} ${NODES_HEADERS})
+# Windows 下用静态库：ovf-core 已是静态（理由见其 CMakeLists），DLL 方案会把
+# core 符号再自动导出一遍，配合 whole-archive 就是 multiple definition。
+# 静态 + whole-archive（ovf-nodes-link）= 注册对象必然进镜像。
+if(WIN32)
+    add_library(ovf-nodes STATIC ${NODES_SOURCES} ${NODES_HEADERS})
+else()
+    add_library(ovf-nodes SHARED ${NODES_SOURCES} ${NODES_HEADERS})
+endif()
 
 target_include_directories(ovf-nodes
     PUBLIC
@@ -64,9 +71,16 @@ target_compile_definitions(ovf-nodes PRIVATE "OVF_NODE_ORIGIN=\"ovf-nodes\"")
 add_library(ovf-nodes-link INTERFACE)
 
 if(WIN32)
-    # MSVC 没有 --as-needed；它不会丢弃"没被引用的"导入库。
-    # Windows 上这个 target 只是个语义别名，保持两种平台调用姿势一致。
-    target_link_libraries(ovf-nodes-link INTERFACE ovf-nodes)
+    # Windows 的对偶问题：ovf-core 改静态库后，链接器对静态库只抽取"被引用过"
+    # 的目标文件 —— 带 OVF_REGISTER_NODE 静态注册对象的目标文件没有任何显式
+    # 引用，整块不被抽取，算子全部消失（症状与 Linux 的 --as-needed 一模一样：
+    # 注册表为空、链接期零警告）。
+    # 修法：whole-archive（MinGW ld 展开为 -Wl,--whole-archive，MSVC 为
+    # /WHOLEARCHIVE），把库里的注册对象无条件拉进最终镜像。
+    # CMake >= 3.24 的 LINK_LIBRARY:WHOLE_ARCHIVE 生成器表达式同时覆盖两家。
+    target_link_libraries(ovf-nodes-link INTERFACE
+        "$<LINK_LIBRARY:WHOLE_ARCHIVE,ovf-nodes>"
+    )
 else()
     # --no-as-needed 走 LINK_OPTIONS：它是个**开关**，作用于其后出现的库，
     # 而 CMake 把 LINK_OPTIONS 放在链接命令行靠前的位置，正好合适。

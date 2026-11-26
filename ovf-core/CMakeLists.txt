@@ -12,16 +12,15 @@ file(GLOB_RECURSE CORE_HEADERS
     "include/*.h"
 )
 
-# 创建动态库
-add_library(ovf-core SHARED ${CORE_SOURCES} ${CORE_HEADERS})
-
-# Windows下生成导入库
+# 库类型：Windows 下用静态库。
+# 原因：WINDOWS_EXPORT_ALL_SYMBOLS 对 MinGW 无法导出虚函数 vtable/内联成员
+# （ovf-nodes 链接时报 undefined reference to vtable for ovf::INode），
+# 静态库直接绕开整套 dllimport/dllexport 泥潭，产物也更好分发。
+# Linux 保持 SHARED（静态注册 + --as-needed 的老问题按 ovf-nodes-link 处理）。
 if(WIN32)
-    set_target_properties(ovf-core PROPERTIES 
-        WINDOWS_EXPORT_ALL_SYMBOLS ON
-        ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/lib/Release"
-        ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/lib/Debug"
-    )
+    add_library(ovf-core STATIC ${CORE_SOURCES} ${CORE_HEADERS})
+else()
+    add_library(ovf-core SHARED ${CORE_SOURCES} ${CORE_HEADERS})
 endif()
 
 target_include_directories(ovf-core

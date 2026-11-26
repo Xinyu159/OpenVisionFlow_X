@@ -107,7 +107,11 @@ OVF_NODES_API const char* module_name();
     // 否则导出出去的也是个弱符号。
     extern "C" OVF_NODES_API const char* ovf_nodes_module_anchor();
     #define OVF_NODES_ANCHOR_WEAK 0
-#elif defined(__GNUC__) || defined(__clang__)
+#elif (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32)
+    // 弱引用只在 ELF 上有"解析不到就是 nullptr"的语义。MinGW 虽然定义
+    // __GNUC__，但 PE/COFF 的弱函数符号退化成链接期桩，取地址/调用会
+    // 直接段错误（实测 UserNodesTest SEGFAULT）——Windows 上静态链接
+    // 本身就把库钉死了，恒真即可，与 MSVC 分支同理。
     extern "C" const char* ovf_nodes_module_anchor() __attribute__((weak));
     #define OVF_NODES_ANCHOR_WEAK 1
 #else

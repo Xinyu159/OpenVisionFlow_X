@@ -24,6 +24,7 @@
     using ovf_socklen_t = socklen_t;
 #endif
 
+#include <algorithm>  // std::remove —— MinGW/Windows 下不会被传递包含，必须显式引入
 #include <cstring>
 #include <chrono>
 
