@@ -124,7 +124,10 @@ static void RunChain(int upto) {
     if (g_s.steps.empty()) return;
     if (upto < 0 || upto >= (int)g_s.steps.size()) upto = (int)g_s.steps.size() - 1;
 
-    Data carry;    // 逐步传递的图像
+    // 关键修复：链的第一步必须吃到"当前载入的图"。
+    // 旧版 carry 从空开始 —— 第一步(OnnxInfer)拿不到输入直接失败，
+    // 后面全部空转，表现为"看起来跑了其实没推理"。
+    Data carry   = Data(g_s.image);
     Data carry_r;  // 逐步传递的 region（如 OnnxInfer 的检出框 → CropROI）
     for (int i = 0; i <= upto; ++i) {
         Step& st = g_s.steps[i];
@@ -410,11 +413,13 @@ static void PanelProgram() {
         Step& st = g_s.steps[i];
         ImGui::PushID(i);
         const bool sel = (g_s.selected == i);
-        const char* flag = st.last_result.is_success() ? "" : "  [失败]";
+        const char* flag = st.last_result.is_success() ? "  [OK]" : "  [失败]";
         if (ImGui::Selectable(("[" + std::to_string(i + 1) + "] " +
                                st.type_id + flag).c_str(), sel)) {
             g_s.selected = i;
         }
+        if (!st.last_result.is_success() && ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", st.last_result.message().c_str());
         ImGui::SameLine(ImGui::GetContentRegionAvail().x - 84);
         ImGui::PushItemWidth(36);
         if (ImGui::Button(st.enabled ? "启用" : "停用")) st.enabled = !st.enabled;
