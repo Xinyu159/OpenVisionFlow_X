@@ -69,12 +69,14 @@ NodeInfo OnnxInferNode::make_info() {
 
     info.params.push_back(ParamDef("model_path", "模型路径(.onnx)", DataType::String,
                                    Data("model.onnx")));
-    info.params.push_back(ParamDef("conf", "置信度阈值", DataType::Number, Data(0.35))
+    info.params.push_back(ParamDef("conf", "置信度阈值", DataType::Number, Data(0.85))
                               .range(0.0, 1.0));
     info.params.push_back(ParamDef("iou", "NMS IoU 阈值", DataType::Number, Data(0.45))
                               .range(0.0, 1.0));
     info.params.push_back(ParamDef("input_size", "输入边长(正方形)", DataType::Number,
                                    Data(640.0)).range(64, 2048));
+    info.params.push_back(ParamDef("format", "解码格式(yolov5/yolov8/rp)", DataType::String,
+                                   Data("yolov5")));
     return info;
 }
 
@@ -124,6 +126,8 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
     OVF_TRY_IN(conf_r, p_num_in("conf", 0.0, 1.0));
     OVF_TRY_IN(iou_r, p_num_in("iou", 0.0, 1.0));
     OVF_TRY_IN(size_r, p_num_in("input_size", 64.0, 2048.0));
+    OVF_TRY_IN(fmt_r, p_str("format"));
+    const String fmt = fmt_r;
 
     const String model_path = path_r;
     const float conf_th = static_cast<float>(conf_r);
@@ -156,20 +160,23 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
         }
     }
 
-    // ---- 预处理：拉伸到 SxS，/255，CHW float ----
+    // ---- 预处理：letterbox（保比例缩放 + 右下黑边，深大 RP 同款左上对齐），/255，CHW ----
     const int in_ch = 3;
-    std::vector<float> tensor((size_t)in_ch * S * S);
-    for (int y = 0; y < S; ++y) {
-        if (!step_ok(context, y, S)) {
+    const float scale = std::min((float)S / W, (float)S / H);
+    const int nw = std::max(1, (int)(W * scale));
+    const int nh = std::max(1, (int)(H * scale));
+    std::vector<float> tensor((size_t)in_ch * S * S, 0.0f);   // 黑边=0
+    for (int y = 0; y < nh; ++y) {
+        if (!step_ok(context, y, nh)) {
             warn_once("partial", "stopped during preprocess; output incomplete");
             set_output("count", Data(0.0));
             return Result<void>::success();
         }
-        const int sy = (int)((int64_t)y * H / S);
-        for (int x = 0; x < S; ++x) {
-            const int sx = (int)((int64_t)x * W / S);
-            const size_t base = ((size_t)sy * W + sx) * ch;
-            // 灰度输入复制 3 份；彩色取前 3 通道
+        const int sy = (int)(y / scale);   // 原图采样
+        for (int x = 0; x < nw; ++x) {
+            const int sx = (int)(x / scale);
+            const size_t base = ((size_t)std::min(sy, H - 1) * W + std::min(sx, W - 1)) * ch;
+            // 灰度输入复制 3 份；彩色取前 3 通道（平面序 R|G|B，对齐 swapRB=true）
             const float r = src.data[base] / 255.0f;
             const float g = ch >= 3 ? src.data[base + 1] / 255.0f : r;
             const float b = ch >= 3 ? src.data[base + 2] / 255.0f : r;
@@ -251,6 +258,52 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
             out[0], out[1], out[2], out[3], out[4], out[5 < C*N ? 5 : 0]);
 
     std::vector<DetBox> boxes;
+    // 深大 RP 导出的模型去掉末端 Sigmoid（TensorRT 惯例，解码端自做）——
+    // 探测：类分列出现 [0,1] 之外的值（raw logits）就要补 sigmoid
+    float probe_min = 1e30f, probe_max = -1e30f;
+    {
+        const int64_t probe = std::min<int64_t>(N, 512);
+        for (int64_t n = 0; n < probe; ++n)
+            for (int c = 0; c < num_cls; ++c) {
+                const float v = out[channels_first ? (int64_t)(4 + c) * N + n
+                                                   : n * C + 4 + c];
+                probe_min = std::min(probe_min, v);
+                probe_max = std::max(probe_max, v);
+            }
+    }
+    const bool raw_logits = (probe_min < 0.0f) || (probe_max > 1.0f);
+    fprintf(stderr, "[DBG] probe=[%.3f,%.3f] raw=%d conf_th=%.3f\n",
+            probe_min, probe_max, (int)raw_logits, conf_th);
+    auto sig = [](float v) { return 1.0f / (1.0f + std::exp(-v)); };
+
+    // ---- rp 格式（深大 RP 关键点模型，22 列）：----
+    // [0..7]=4 角点 xy（输入坐标系） [8]=obj(需 sigmoid)
+    // [9..12]=4 色类 argmax [13..21]=9 数类 argmax（均为 raw logits，不进置信度）
+    if (fmt == "rp" || (fmt == "auto" && C == 22)) {
+        for (int64_t n = 0; n < N; ++n) {
+            const float* row = out + n * C;      // rp 输出恒为 (1, N, 22)
+            const float conf = sig(row[8]);
+            if (conf < conf_th) continue;
+            // 角点重排 (0,1)(6,7)(4,5)(2,3) → 左上,右上,右下,左下；/scale 还原图坐标
+            const float px[8] = {row[0], row[1], row[6], row[7],
+                                 row[4], row[5], row[2], row[3]};
+            float x1 = 1e30f, y1 = 1e30f, x2 = -1e30f, y2 = -1e30f;
+            bool finite = true;
+            for (int k = 0; k < 4; ++k) {
+                const float x = px[2 * k] / scale, y = px[2 * k + 1] / scale;
+                if (!std::isfinite(x) || !std::isfinite(y)) { finite = false; break; }
+                x1 = std::min(x1, x); y1 = std::min(y1, y);
+                x2 = std::max(x2, x); y2 = std::max(y2, y);
+            }
+            if (!finite) continue;
+            int color_id = 0, num_id = 0;
+            for (int c = 1; c < 4; ++c)  if (row[9 + c]  > row[9 + color_id])  color_id = c;
+            for (int c = 1; c < 9; ++c)  if (row[13 + c] > row[13 + num_id])  num_id = c;
+            DetBox b{x1, y1, x2, y2, conf, color_id * 10 + num_id};
+            if (b.x2 <= b.x1 || b.y2 <= b.y1) continue;
+            boxes.push_back(b);
+        }
+    } else
     for (int64_t n = 0; n < N; ++n) {
         // 找最大类置信度（v5 的 obj 位在第 4 列，乘上去近似）
         int best_c = 0;
@@ -261,10 +314,13 @@ Result<void> OnnxInferNode::execute(FlowContext& context) {
                 : n * C + 4 + c;
             if (out[idx] > best_p) { best_p = out[idx]; best_c = c; }
         }
+        if (raw_logits) best_p = sig(best_p);
         float score = best_p;
         if (C == (int64_t)(5 + num_cls)) {   // v5：乘 obj
             const int64_t obj_idx = channels_first ? (int64_t)4 * N + n : n * C + 4;
-            score *= out[obj_idx];
+            float obj = out[obj_idx];
+            if (raw_logits) obj = sig(obj);
+            score *= obj;
         }
         if (score < conf_th) continue;
 

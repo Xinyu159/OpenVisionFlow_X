@@ -123,7 +123,8 @@ static void RunChain(int upto) {
     if (g_s.steps.empty()) return;
     if (upto < 0 || upto >= (int)g_s.steps.size()) upto = (int)g_s.steps.size() - 1;
 
-    Data carry;  // 逐步传递的图像
+    Data carry;    // 逐步传递的图像
+    Data carry_r;  // 逐步传递的 region（如 OnnxInfer 的检出框 → CropROI）
     for (int i = 0; i <= upto; ++i) {
         Step& st = g_s.steps[i];
         if (!st.enabled) continue;
@@ -132,6 +133,12 @@ static void RunChain(int upto) {
         if (carry.is_image()) {
             for (const auto& in : st.node->info().inputs) {
                 if (in.data_type == DataType::Image) { st.node->set_input(in.id, carry); break; }
+            }
+        }
+        // region 口同理（可选输入，上一步有就喂）
+        if (carry_r.is_region()) {
+            for (const auto& in : st.node->info().inputs) {
+                if (in.data_type == DataType::Region) { st.node->set_input(in.id, carry_r); break; }
             }
         }
         FlowContext ctx;
@@ -146,6 +153,10 @@ static void RunChain(int upto) {
         }
         if (!pick.empty()) carry = st.node->get_output(pick);
         else carry = Data();
+        String pick_r;
+        for (const auto& out : st.node->info().outputs)
+            if (out.data_type == DataType::Region) { pick_r = out.id; break; }
+        if (!pick_r.empty()) carry_r = st.node->get_output(pick_r);
     }
     if (carry.is_image()) g_s.image = carry.as_image();
 }
@@ -181,13 +192,18 @@ static bool LoadImageFile(const std::string& path) {
     if (!px || w <= 0 || h <= 0) return false;
     ImageData img;
     img.width = (uint32_t)w; img.height = (uint32_t)h;
-    img.channels = 1; img.format = ImageFormat::Mono8;
-    img.data.assign((size_t)w * h, 0);
-    const int ch = n > 0 ? n : 1;
-    for (size_t i = 0; i < (size_t)w * h; ++i) {
-        unsigned v = 0;
-        for (int c = 0; c < ch && c < 3; ++c) v += px[i * ch + c];
-        img.data[i] = (unsigned char)(ch >= 3 ? v / 3 : v);
+    const int ch = (n >= 3 ? 3 : 1);
+    img.channels = (uint32_t)ch;
+    img.format = (ch == 3) ? ImageFormat::RGB8 : ImageFormat::Mono8;
+    img.data.assign((size_t)w * h * ch, 0);
+    if (ch == 3) {
+        for (size_t i = 0; i < (size_t)w * h; ++i) {
+            img.data[i * 3 + 0] = px[i * 3 + 0];
+            img.data[i * 3 + 1] = px[i * 3 + 1];
+            img.data[i * 3 + 2] = px[i * 3 + 2];
+        }
+    } else {
+        for (size_t i = 0; i < (size_t)w * h; ++i) img.data[i] = px[i];
     }
     stbi_image_free(px);
     g_s.image = std::move(img);

@@ -47,13 +47,18 @@ int main(int argc, char** argv) {
 
     ImageData img;
     img.width = (uint32_t)w; img.height = (uint32_t)h;
-    img.channels = 1; img.format = ImageFormat::Mono8;
-    img.data.assign((size_t)w * h, 0);
-    const int ch = n > 0 ? n : 1;
-    for (size_t i = 0; i < (size_t)w * h; ++i) {
-        unsigned v = 0;
-        for (int c = 0; c < ch && c < 3; ++c) v += px[i * ch + c];
-        img.data[i] = (unsigned char)(ch >= 3 ? v / 3 : v);
+    const int ch = (n >= 3 ? 3 : 1);
+    img.channels = (uint32_t)ch;
+    img.format = (ch == 3) ? ImageFormat::RGB8 : ImageFormat::Mono8;
+    img.data.assign((size_t)w * h * ch, 0);
+    if (ch == 3) {
+        for (size_t i = 0; i < (size_t)w * h; ++i) {
+            img.data[i * 3 + 0] = px[i * 3 + 0];   // stb 默认就是 RGB 顺序
+            img.data[i * 3 + 1] = px[i * 3 + 1];
+            img.data[i * 3 + 2] = px[i * 3 + 2];
+        }
+    } else {
+        for (size_t i = 0; i < (size_t)w * h; ++i) img.data[i] = px[i];
     }
     TRACE("decoded %dx%dx%d\n", w, h, n);
     stbi_image_free(px);
