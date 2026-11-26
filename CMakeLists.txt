@@ -101,6 +101,11 @@ add_subdirectory(ovf-plugins)
 # 相机驱动插件（基于GenICam标准）
 add_subdirectory(ovf-plugin-camera)
 
+# 算子体检工具。放在最后：它要链 ovf-core + ovf-algorithm（可选 ovf-nodes-link），
+# 三个目标都得先定义好。日常构建也编它 —— 它是"这个平台还健康吗"的常规手段，
+# 不该是需要专门开关才有的东西。
+add_subdirectory(tools/node_audit)
+
 # 测试模块（纯C++测试框架，无外部依赖）
 if(BUILD_TESTS)
     add_subdirectory(tests)

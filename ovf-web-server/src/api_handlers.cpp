@@ -5,6 +5,7 @@
 
 #include "ovf/web_server.h"
 #include "ovf/core/logger.h"
+#include "ovf/core/node_health.h"
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -391,6 +392,20 @@ void ApiHandlers::handle_get_nodes(const HttpRequest& req, HttpResponse& res, We
             // 前端的注释写着"需要单独查询"，但它从没调过 /api/node/{type}，等于永远拿不到。
             json node = node_info_to_json(*info);
             node["type_id"] = type;
+
+            // 体检结论。**只标注、不改变行为** —— 501 个算子全部照常注册、
+            // 照常可调用，画布上可以把 D 档灰掉，但没有任何东西被摘掉。
+            // 没体检过（表里查不到）就不加这个字段，前端自然显示"未体检"，
+            // 而不是被一个假的 A 档骗过去。
+            const NodeHealth h = NodeHealthRegistry::instance().query(type);
+            if (h.known()) {
+                json health = json::object();
+                health["tier"]  = h.tier;
+                health["score"] = h.score;
+                health["note"]  = h.note;
+                node["health"]  = health;
+            }
+
             nodes.push_back(node);
         }
     }

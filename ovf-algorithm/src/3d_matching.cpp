@@ -608,8 +608,11 @@ ErrorCode extract_entity_edges(const DXFEntity& entity,
 
         case DXFEntityType::Polyline:
         case DXFEntityType::LWPolyline:
-            // 多段线：依次采样每段
-            for (size_t i = 0; i < entity.points.size() - 1; ++i) {
+            // 多段线：依次采样每段。
+            // 写成 `i + 1 < size()` 而不是 `i < size() - 1`：后者在 points 为空时
+            // `size() - 1` 在 size_t 下回绕成 SIZE_MAX，循环会去索引空 vector 的
+            // [0]、[1]。两种写法在 size >= 1 时**逐次迭代完全相同**。
+            for (size_t i = 0; i + 1 < entity.points.size(); ++i) {
                 const Point3Df& p1 = entity.points[i];
                 const Point3Df& p2 = entity.points[i + 1];
                 float length = p1.distance_to(p2);
@@ -805,8 +808,9 @@ ErrorCode render_geometry(const DXFGeometry& geometry,
         Vector<Point3Df> edge_points;
         extract_entity_edges(entity, edge_points, 2.0f);
 
-        // 投影并绘制
-        for (size_t i = 0; i < edge_points.size() - 1; ++i) {
+        // 投影并绘制。`extract_entity_edges` 对认不出的实体类型会一个点都不产生，
+        // 所以这里必须用 `i + 1 < size()` 的形式（空 vector 上 `size() - 1` 会回绕）。
+        for (size_t i = 0; i + 1 < edge_points.size(); ++i) {
             Point2D<float> p1 = project_point_3d_to_2d(edge_points[i], pose, camera_params);
             Point2D<float> p2 = project_point_3d_to_2d(edge_points[i + 1], pose, camera_params);
 

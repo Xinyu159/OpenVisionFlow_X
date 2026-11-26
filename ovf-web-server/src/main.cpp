@@ -5,6 +5,7 @@
 
 #include "ovf/web_server.h"
 #include "ovf/core/logger.h"
+#include "ovf/core/node_health.h"
 #include "ovf/algorithm/algorithm.h"
 #ifdef OVF_WITH_USER_NODES
 #include "ovf/nodes/nodes.h"
@@ -161,6 +162,16 @@ int main(int argc, char* argv[]) {
     // ovf-algorithm/ —— 那个目录要对上游保持零 diff。
     // 冲突数非 0 意味着有算子被静默丢弃，这一行就是发现它的地方。
     ovf::NodeFactory::instance().log_summary();
+
+    // 算子体检结论（`ovf-node-audit --update-annotations` 写在 health/ 里的那份）。
+    // **fail-open**：文件不在、格式不对、没跑过体检 —— 都只是"没有标注"，
+    // 绝不能让服务器起不来。所以这里不看返回值，也不报错。
+    // 加载失败时 /api/nodes 就不带 health 字段，前端显示"未体检"。
+    if (!ovf::NodeHealthRegistry::instance().load_default()) {
+        std::cerr << "[INFO] 没有找到算子体检表（health/node_health.json），"
+                     "节点不会带 health 标注。"
+                     "跑一次 `ovf-node-audit --full --update-annotations` 就有了。\n";
+    }
 
     // 创建服务器
     g_server = std::make_shared<WebServer>();
