@@ -44,14 +44,13 @@ target_include_directories(ovf-web-server
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-core/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-core/thirdparty
-        ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-algorithm/include
 )
 
 # 链接库（ws2_32 是 Windows 专属，只在下面 if(WIN32) 块里链，不能放这里）
+# windows-rebuild：ovf-algorithm 已移除，算子全部来自 ovf-nodes。
 target_link_libraries(ovf-web-server
     PRIVATE
         ovf-core
-        ovf-algorithm
 )
 
 # 用户算子模块（-DBUILD_OVF_NODES=OFF 时整块摘掉）。

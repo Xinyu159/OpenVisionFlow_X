@@ -78,33 +78,21 @@ add_compile_definitions(OVF_VERSION="${PROJECT_VERSION}")
 add_compile_definitions(OVF_PROJECT_NAME="${PROJECT_NAME}")
 
 # 子模块
+# windows-rebuild 重构（2026-11-26）：上游 ovf-algorithm（502 算子）、ovf-plugins、
+# ovf-plugin-camera、ovf-sdk-python、ovf-editor、tools/node_audit 已整体移除，
+# 保留在 git 历史（merge 前的 main 分支）中。
+# 本仓库现在的形态：Windows 优先 + 引擎（ovf-core）+ 自建算子模块（ovf-nodes）为唯一算子来源，
+# 算子按需一个个重写填充。
 add_subdirectory(ovf-core)
-add_subdirectory(ovf-algorithm)
 
 # 用户算子模块。位置在 ovf-web-server 之前，因为后者要链 ovf-nodes-link。
-# 它只依赖 ovf-core —— 501 个老算子是历史资产，不是新算子的依赖。
+# 它只依赖 ovf-core。新算子全部写在这里（见 ovf-nodes/README 或 docs/DEVELOPMENT.md）。
 if(BUILD_OVF_NODES)
     add_subdirectory(ovf-nodes)
 endif()
 
 add_subdirectory(ovf-sdk)
-add_subdirectory(ovf-sdk-python)
 add_subdirectory(ovf-web-server)
-
-if(Qt6_FOUND)
-    add_subdirectory(ovf-editor)
-endif()
-
-# 插件模块（简化版，不依赖OpenCV）
-add_subdirectory(ovf-plugins)
-
-# 相机驱动插件（基于GenICam标准）
-add_subdirectory(ovf-plugin-camera)
-
-# 算子体检工具。放在最后：它要链 ovf-core + ovf-algorithm（可选 ovf-nodes-link），
-# 三个目标都得先定义好。日常构建也编它 —— 它是"这个平台还健康吗"的常规手段，
-# 不该是需要专门开关才有的东西。
-add_subdirectory(tools/node_audit)
 
 # 测试模块（纯C++测试框架，无外部依赖）
 if(BUILD_TESTS)
