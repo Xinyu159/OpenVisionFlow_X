@@ -260,6 +260,38 @@ static void BrowseRelative(int delta) {
     RunChain((int)g_s.steps.size() - 1);
 }
 
+// 一键装甲板示例：整条链自动配好并运行（新手入口，不用手动配任何参数）
+static const char* kDefaultArmorModel =
+    "C:/Users/ASUS/Desktop/projects/rm_vision/models/0526.onnx";
+
+static void LoadArmorDemo() {
+    g_s.steps.clear();
+    auto& factory = NodeFactory::instance();
+
+    auto add = [&](const char* type) -> Step* {
+        Step st;
+        st.type_id = type;
+        st.node = factory.create(type, "step_" + std::to_string(g_s.steps.size()));
+        if (!st.node) return nullptr;
+        g_s.steps.push_back(std::move(st));
+        return &g_s.steps.back();
+    };
+
+    if (Step* s1 = add("nodes.OnnxInfer")) {
+        s1->node->set_param("model_path", Data(String(kDefaultArmorModel)));
+        s1->node->set_param("format", Data(String("rp")));
+        s1->node->set_param("conf", Data(0.85));
+    }
+    if (Step* s2 = add("nodes.CropROI"))
+        s2->node->set_param("expand", Data(10.0));
+    add("nodes.LightbarDetect");
+
+    if (g_s.image.data.empty()) g_s.image = MakeTestImage();
+    RunChain(-1);
+    UploadImage(g_s.image);
+    g_s.selected = 0;   // 参数面板直接显示第一步
+}
+
 // --------------------------------------------------------------------------
 // UI 面板
 // --------------------------------------------------------------------------
@@ -335,6 +367,8 @@ static void PanelProgram() {
     ImGui::SameLine();
     if (ImGui::Button("载入测试图")) { g_s.image = MakeTestImage(); UploadImage(g_s.image); }
     ImGui::SameLine();
+    if (ImGui::Button("<< 一键装甲板示例 >>")) LoadArmorDemo();
+    ImGui::SameLine();
     if (ImGui::Button("打开图像...")) OpenImageDialog();
     ImGui::SameLine();
     if (ImGui::Button("<<")) BrowseRelative(-1);
@@ -399,9 +433,8 @@ static void PanelParams() {
             buf[sizeof(buf) - 1] = 0;
             if (ImGui::InputText(p.name.c_str(), buf, sizeof(buf)))
                 st.node->set_param(p.id, Data(String(buf)));
-            if (p.id.find("path") != String::npos) {   // 路径参数给个浏览按钮
-                ImGui::SameLine();
-                if (ImGui::Button("...")) {
+            if (p.id.find("path") != String::npos) {   // 路径参数给个整行浏览按钮
+                if (ImGui::Button("浏览文件... (选 .onnx 模型)", ImVec2(-1, 0))) {
                     wchar_t file[MAX_PATH] = L"";
                     OPENFILENAMEW ofn{};
                     ofn.lStructSize = sizeof(ofn);
