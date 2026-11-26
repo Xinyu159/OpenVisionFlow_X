@@ -91,6 +91,19 @@ else()
     target_link_libraries(ovf-nodes-link INTERFACE ovf-nodes "-Wl,--as-needed")
 endif()
 
+# ---- onnxruntime（OnnxInfer 算子依赖，nuget win-x64 版本 vendored）----
+# dll 不入库（.gitignore），由下方 POST_BUILD 从 thirdparty 拷到运行目录
+if(WIN32)
+    target_include_directories(ovf-nodes PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/onnxruntime/include)
+    target_link_libraries(ovf-nodes PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/onnxruntime/lib/onnxruntime.lib)
+    add_custom_command(TARGET ovf-nodes POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/onnxruntime/lib/onnxruntime.dll
+            $<TARGET_FILE_DIR:ovf-nodes>)
+endif()
+
 # ============================================================================
 # 测试
 # ============================================================================

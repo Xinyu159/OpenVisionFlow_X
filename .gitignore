@@ -80,3 +80,6 @@ temp/
 #   pwned.json     —— 路径穿越用例（脚本会断言它没写到 /tmp/pwned.json）
 examples/flows/e2e_flow.json
 examples/flows/pwned.json
+
+# vendored 运行库太大不入库（README 记下载方式）
+ovf-nodes/thirdparty/onnxruntime/lib/onnxruntime.dll

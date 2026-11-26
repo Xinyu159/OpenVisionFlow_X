@@ -50,6 +50,18 @@ int main(int argc, char** argv) {
     auto node = factory.create(op, "cli");
     if (!node) { std::printf("[ERR] create failed\n"); return 1; }
 
+    // 附加参数：argv[i]="key=value"（数值自动判别，否则按字符串）
+    for (int i = 3; i < argc; ++i) {
+        std::string kv(argv[i]);
+        auto eq = kv.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = kv.substr(0, eq), v = kv.substr(eq + 1);
+        char* end = nullptr;
+        const double d = strtod(v.c_str(), &end);
+        if (end && *end == '\0' && !v.empty()) node->set_param(k, Data(d));
+        else node->set_param(k, Data(String(v)));
+    }
+
     for (const auto& in : node->info().inputs)
         if (in.data_type == DataType::Image) { node->set_input(in.id, Data(img)); break; }
 
