@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <algorithm>
 #include <string>
 
 // --------------------------------------------------------------------------
@@ -286,7 +287,33 @@ static void LoadArmorDemo() {
         s2->node->set_param("expand", Data(10.0));
     add("nodes.LightbarDetect");
 
-    if (g_s.image.data.empty()) g_s.image = MakeTestImage();
+    // 优先真实装甲板帧：从 exe 目录逐级向上找 datasets/real_armor
+    if (g_s.image.data.empty()) {
+        static const char* dirs[] = {
+            "datasets/real_armor",
+            "../../datasets/real_armor",
+            "../../../datasets/real_armor",
+            "../../../../datasets/real_armor",
+        };
+        bool loaded = false;
+        for (const char* d : dirs) {
+            WIN32_FIND_DATAA fd;
+            HANDLE h = FindFirstFileA((std::string(d) + "\*.jpg").c_str(), &fd);
+            if (h == INVALID_HANDLE_VALUE) continue;
+            std::vector<std::string> names;
+            do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                     names.push_back(fd.cFileName); } while (FindNextFileA(h, &fd));
+            FindClose(h);
+            if (!names.empty()) {
+                std::sort(names.begin(), names.end());
+                loaded = LoadImageFile(std::string(d) + "\\" + names[1 < names.size() ? 1 : 0]);
+                ScanDir(d);
+                g_s.dir_idx = 1;
+                if (loaded) break;
+            }
+        }
+        if (!loaded) g_s.image = MakeTestImage();   // 兜底才是示意图
+    }
     RunChain(-1);
     UploadImage(g_s.image);
     g_s.selected = 0;   // 参数面板直接显示第一步
@@ -359,21 +386,21 @@ static void PanelOperatorLibrary() {
 
 static void PanelProgram() {
     if (!ImGui::Begin("程序（步骤链）")) { ImGui::End(); return; }
-    if (ImGui::Button("运行全部")) { RunChain(-1); UploadImage(g_s.image); }
+    const ImVec2 btn(110, 34);
+    if (ImGui::Button("打开图像...", btn)) OpenImageDialog();
     ImGui::SameLine();
-    if (ImGui::Button("运行到选中")) {
+    if (ImGui::Button("一键装甲板示例", btn)) LoadArmorDemo();
+    ImGui::SameLine();
+    if (ImGui::Button("运行全部", btn)) { RunChain(-1); UploadImage(g_s.image); }
+    ImGui::SameLine();
+    if (ImGui::Button("运行到选中", btn)) {
         if (g_s.selected >= 0) { RunChain(g_s.selected); UploadImage(g_s.image); }
     }
     ImGui::SameLine();
-    if (ImGui::Button("载入测试图")) { g_s.image = MakeTestImage(); UploadImage(g_s.image); }
+    if (ImGui::Button("<< 上一张", btn)) BrowseRelative(-1);
     ImGui::SameLine();
-    if (ImGui::Button("<< 一键装甲板示例 >>")) LoadArmorDemo();
-    ImGui::SameLine();
-    if (ImGui::Button("打开图像...")) OpenImageDialog();
-    ImGui::SameLine();
-    if (ImGui::Button("<<")) BrowseRelative(-1);
-    ImGui::SameLine();
-    if (ImGui::Button(">>")) BrowseRelative(1);
+    if (ImGui::Button("下一张 >>", btn)) BrowseRelative(1);
+    ImGui::Spacing();
     if (!g_s.dir_files.empty() && g_s.dir_idx >= 0)
         ImGui::Text("浏览: %d/%zu  %s", g_s.dir_idx + 1, g_s.dir_files.size(),
                     g_s.dir_files[g_s.dir_idx].c_str());
@@ -539,7 +566,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_cmd) {
         bool loaded = false;
         for (const char* f : candidates) {
             if (font_io.Fonts->AddFontFromFileTTF(
-                    f, 20.0f, nullptr,
+                    f, 22.0f, nullptr,
                     font_io.Fonts->GetGlyphRangesChineseSimplifiedCommon())) {
                 loaded = true;
                 break;
@@ -575,16 +602,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int show_cmd) {
             ImGui::DockBuilderRemoveNode(dock);
             ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
             ImGui::DockBuilderSetNodeSize(dock, ImGui::GetMainViewport()->WorkSize);
-            ImGuiID left, right, main, bottom, mid;
-            ImGui::DockBuilderSplitNode(dock, ImGuiDir_Left, 0.24f, &left, &main);
-            ImGui::DockBuilderSplitNode(main, ImGuiDir_Right, 0.26f, &right, &main);
-            ImGui::DockBuilderSplitNode(main, ImGuiDir_Down, 0.22f, &bottom, &mid);
-            ImGuiID lib, prog;
-            ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.45f, &prog, &lib);
+            // HDevelop 式：左侧 算子库+程序+参数（参数在最下，紧贴操作对象），
+            // 中间大图形窗口为主视野，底部细日志条
+            ImGuiID left, bottom, mid, right, lib, main;
+            ImGui::DockBuilderSplitNode(dock, ImGuiDir_Left, 0.30f, &left, &main);
+            ImGui::DockBuilderSplitNode(main, ImGuiDir_Down, 0.18f, &bottom, &mid);
+            ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.34f, &right, &left);  // left下段=参数
+            ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.45f, &lib, &left);    // left中=程序,上=算子库
             ImGui::DockBuilderDockWindow("算子库", lib);
-            ImGui::DockBuilderDockWindow("程序（步骤链）", prog);
-            ImGui::DockBuilderDockWindow("图形窗口", mid);
+            ImGui::DockBuilderDockWindow("程序（步骤链）", left);
             ImGui::DockBuilderDockWindow("参数", right);
+            ImGui::DockBuilderDockWindow("图形窗口", mid);
             ImGui::DockBuilderDockWindow("日志", bottom);
             ImGui::DockBuilderFinish(dock);
         }
