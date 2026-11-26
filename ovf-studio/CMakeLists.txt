@@ -23,6 +23,7 @@ add_executable(ovf-studio
 target_include_directories(ovf-studio PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/stb
     ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-core/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-nodes/include
 )
@@ -35,6 +36,7 @@ target_link_libraries(ovf-studio PRIVATE
     dxgi
     d3dcompiler
     dwmapi
+    comdlg32      # GetOpenFileNameW 文件对话框
 )
 
 if(MSVC)
@@ -45,5 +47,14 @@ else()
     target_compile_options(ovf-studio PRIVATE -municode)
     target_link_options(ovf-studio PRIVATE -municode)
 endif()
+
+# 无头批量验证 CLI（数据集测试用）
+add_executable(ovf-run src/run_cli.cpp)
+target_include_directories(ovf-run PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/stb
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-core/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ovf-nodes/include
+)
+target_link_libraries(ovf-run PRIVATE ovf-core ovf-nodes-link)
 
 install(TARGETS ovf-studio RUNTIME DESTINATION bin)
